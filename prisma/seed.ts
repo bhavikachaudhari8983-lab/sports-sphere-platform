@@ -24,7 +24,7 @@ import { sendAnnouncement } from "../src/lib/announcements";
 const prisma = new PrismaClient();
 
 export const DEMO_STAFF = [
-  { email: "admin@sportssphere.example", name: "Asha Admin (demo)", role: "ADMIN", password: "Admin@12345" },
+  { email: "admin@sportssphere.example", name: "Asha Admin (demo)", role: "SUPER_ADMIN", password: "Admin@12345" },
   // Second admin: DOB corrections need two different admins (maker–checker).
   { email: "admin2@sportssphere.example", name: "Ravi Admin (demo)", role: "ADMIN", password: "Admin2@12345" },
   { email: "official@sportssphere.example", name: "Omar Official (demo)", role: "OFFICIAL", password: "Official@12345" },
@@ -58,7 +58,10 @@ async function main() {
     prisma.certificate.deleteMany(),
     prisma.placing.deleteMany(),
     prisma.scoreEvent.deleteMany(),
+    prisma.matchOfficial.deleteMany(),
     prisma.match.deleteMany(),
+    prisma.court.deleteMany(),
+    prisma.venue.deleteMany(),
     prisma.teamMember.deleteMany(),
     prisma.team.deleteMany(),
     prisma.reviewLock.deleteMany(),
@@ -71,6 +74,7 @@ async function main() {
     prisma.verificationCheck.deleteMany(),
     prisma.document.deleteMany(),
     prisma.deletionRequest.deleteMany(),
+    prisma.notification.deleteMany(),
     prisma.student.deleteMany(),
     prisma.college.deleteMany(),
     prisma.school.deleteMany(),
@@ -78,6 +82,7 @@ async function main() {
     prisma.staffUser.deleteMany(),
     prisma.weightCategory.deleteMany(),
     prisma.event.deleteMany(),
+    prisma.tournament.deleteMany(),
     prisma.sport.deleteMany(),
     prisma.ageCategory.deleteMany(),
     prisma.otpChallenge.deleteMany(),
@@ -147,6 +152,20 @@ async function main() {
   };
 
   // Staff
+  // Tournaments (fictional demo set-up). Every event belongs to one; registration is open for the current one.
+  const day = 86_400_000;
+  const current = await prisma.tournament.create({
+    data: {
+      name: DEFAULT_SETTINGS.meetName, slug: "sports-sphere-inter-university-games-2026", season: "2026-27",
+      startDate: "2026-12-01", endDate: "2026-12-10",
+      registrationOpensAt: new Date(Date.now() - 30 * day), registrationClosesAt: new Date(Date.now() + 60 * day), status: "ACTIVE",
+    },
+  });
+  await prisma.event.updateMany({ where: { tournamentId: null }, data: { tournamentId: current.id } });
+  await prisma.tournament.create({
+    data: { name: "Hoop It Up 2027 (demo)", slug: "hoop-it-up-2027-demo", season: "2027-28", startDate: "2027-08-27", endDate: "2027-08-30", registrationOpensAt: new Date("2027-07-01T09:00:00+05:30"), registrationClosesAt: new Date("2027-08-15T23:59:00+05:30"), status: "DRAFT" },
+  });
+
   const staff: Record<string, string> = {};
   for (const s of DEMO_STAFF) {
     const u = await prisma.staffUser.create({
@@ -161,6 +180,7 @@ async function main() {
     staff[s.role] ??= u.id;
     staff[s.email] = u.id;
   }
+  staff.ADMIN = staff["admin@sportssphere.example"]; // seeded admin actions are by Asha (the super admin)
 
   // Colleges
   const trustedCollege = await prisma.college.create({
@@ -404,7 +424,7 @@ async function main() {
     for (const eventId of eventIds) await prisma.registration.create({ data: { studentId: st.id, eventId } });
     return st;
   };
-  const admin = { type: "STAFF" as const, id: staff.ADMIN, name: "Asha Admin (demo)", role: "ADMIN" as const };
+  const admin = { type: "STAFF" as const, id: staff.ADMIN, name: "Asha Admin (demo)", role: "SUPER_ADMIN" as const };
   const official = { type: "STAFF" as const, id: staff.OFFICIAL, name: "Omar Official (demo)", role: "OFFICIAL" as const };
 
   // a) Football men: 4 school squads, league, half played, one match live.
@@ -454,6 +474,23 @@ async function main() {
   await issueForEvent(sprint.id, admin, null);
 
   // d) Announcements
+  // Venues & courts (fictional). Matches of the same round go on different courts, so nothing clashes.
+  const ground = await prisma.venue.create({ data: { name: "Main Campus Sports Complex (demo)", address: "Main Campus (fictional)" } });
+  const courtIds: Record<string, string[]> = {
+    football: [(await prisma.court.create({ data: { venueId: ground.id, name: "Football Ground A" } })).id, (await prisma.court.create({ data: { venueId: ground.id, name: "Football Ground B" } })).id],
+    badminton: [(await prisma.court.create({ data: { venueId: ground.id, name: "Badminton Court 1" } })).id, (await prisma.court.create({ data: { venueId: ground.id, name: "Badminton Court 2" } })).id],
+  };
+  await prisma.court.create({ data: { venueId: ground.id, name: "Athletics Track" } });
+  for (const [evId, key] of [[football.id, "football"], [badminton.id, "badminton"]] as const) {
+    for (const m of await prisma.match.findMany({ where: { eventId: evId, bye: false } })) {
+      await prisma.match.update({ where: { id: m.id }, data: { courtId: courtIds[key][(m.slot - 1) % courtIds[key].length] } });
+    }
+  }
+  // The demo official scores the football matches still to be played (including the live one).
+  for (const m of await prisma.match.findMany({ where: { eventId: football.id, bye: false, status: { in: ["SCHEDULED", "LIVE"] } } })) {
+    await prisma.matchOfficial.create({ data: { matchId: m.id, staffId: staff.OFFICIAL, duty: "SCOREKEEPER", assignedById: staff.ADMIN } });
+  }
+
   await sendAnnouncement({ title: "Opening ceremony on 3 Dec, 8:30 am", body: "All approved athletes: report to the Main Ground by 8:15 am with your QR Sports ID.", audience: "ATHLETES", eventId: null, channels: ["SMS"] }, admin, null);
   await sendAnnouncement({ title: "Football: matchday 3 kicks off at 11 am", body: "Captains, submit your starting seven to the desk 30 minutes before kick-off.", audience: "EVENT", eventId: football.id, channels: ["WHATSAPP"] }, admin, null);
   await sendAnnouncement({ title: "Officials briefing", body: "Scoring app walkthrough at 8 am in the Seminar Hall. Bring a charged phone.", audience: "OFFICIALS", eventId: null, channels: [] }, admin, null);

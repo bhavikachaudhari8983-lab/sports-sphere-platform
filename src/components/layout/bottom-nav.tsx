@@ -7,9 +7,9 @@ import { cn } from "@/lib/utils";
 
 const items = [
   { href: "/", label: "Home", icon: Home },
+  { href: "/events", label: "Live", icon: Trophy },
   { href: "/register", label: "Register", icon: ClipboardList },
-  { href: "/events", label: "Results", icon: Trophy },
-  { href: "/status", label: "Status", icon: IdCard },
+  { href: "/status", label: "Account", icon: IdCard },
 ];
 
 /** Student bottom navigation — mobile only. */

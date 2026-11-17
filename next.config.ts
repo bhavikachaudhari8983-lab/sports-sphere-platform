@@ -12,6 +12,8 @@ const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
   poweredByHeader: false,
   serverExternalPackages: ["bcryptjs"],
+  // Certificates and ID cards read these from disk at request time; Vercel only ships traced files.
+  outputFileTracingIncludes: { "/**": ["./assets/fonts/**/*", "./public/brand/**/*"] },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

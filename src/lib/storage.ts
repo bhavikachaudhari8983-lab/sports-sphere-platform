@@ -1,5 +1,7 @@
 // Private file storage. Files live OUTSIDE /public and are only served by
-// /api/documents/[id] after an authorisation check. Swap this module for S3/GCS later.
+// /api/documents/[id] after an authorisation check.
+// Local disk by default; a private Supabase Storage bucket when SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
+// are set (needed on Vercel, whose disk is wiped between requests).
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -20,6 +22,12 @@ export async function saveFile(data: Uint8Array, mimeType: string): Promise<stri
   const ext = EXT[mimeType];
   if (!ext) throw new Error(`Unsupported type ${mimeType}`);
   const key = `${randomUUID()}.${ext}`;
+  const remote = supabase();
+  if (remote) {
+    const r = await remote.fetch(key, { method: "POST", headers: { "Content-Type": mimeType, "x-upsert": "false" }, body: Buffer.from(data) });
+    if (!r.ok) throw new Error(`Storage upload failed (${r.status}): ${await r.text()}`);
+    return key;
+  }
   await mkdir(uploadRoot(), { recursive: true });
   await writeFile(join(uploadRoot(), key), data, { mode: 0o600 });
   return key;
@@ -31,15 +39,43 @@ function safePath(key: string): string {
 }
 
 export async function readStoredFile(key: string): Promise<Buffer> {
-  return readFile(safePath(key));
+  const path = safePath(key);
+  const remote = supabase();
+  if (!remote) return readFile(path);
+  const r = await remote.fetch(key, { method: "GET" });
+  if (!r.ok) throw new Error(`Storage read failed (${r.status})`);
+  return Buffer.from(await r.arrayBuffer());
 }
 
 export async function deleteStoredFile(key: string): Promise<void> {
   try {
-    await unlink(safePath(key));
+    const path = safePath(key);
+    const remote = supabase();
+    if (remote) {
+      await remote.fetch(key, { method: "DELETE" });
+      return;
+    }
+    await unlink(path);
   } catch {
     // already gone
   }
+}
+
+export const STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET?.trim() || "uploads";
+
+/** Supabase Storage client (REST, no SDK), or null when not configured. */
+function supabase() {
+  const url = process.env.SUPABASE_URL?.trim().replace(/\/$/, "");
+  const secret = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!url || !secret) return null;
+  return {
+    fetch: (key: string, init: RequestInit) =>
+      fetch(`${url}/storage/v1/object/${STORAGE_BUCKET}/${key}`, {
+        ...init,
+        cache: "no-store",
+        headers: { ...(init.headers as Record<string, string>), apikey: secret, Authorization: `Bearer ${secret}` },
+      }),
+  };
 }
 
 /** Checks magic bytes so a renamed file can't pass as an image/PDF. */

@@ -54,7 +54,7 @@ export function BulkApprove({ rows }: { rows: Row[] }) {
           </ul>
         </div>
       )}
-      <div className="sticky top-16 z-10 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface p-3 shadow-card lg:top-2">
+      <div className="sticky top-20 z-10 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface p-3 shadow-card lg:top-2">
         <label className="flex min-h-11 cursor-pointer items-center gap-2 font-medium">
           <input type="checkbox" checked={all} onChange={() => setSelected(all ? new Set() : new Set(rows.map((r) => r.id)))} className="size-5 accent-[var(--primary)]" />
           Select all ({rows.length})

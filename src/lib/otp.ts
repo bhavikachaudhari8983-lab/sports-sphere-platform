@@ -11,7 +11,8 @@ export type OtpMeta =
   | { path: "A"; prn: string }
   | { path: "B" }
   | { path: "C" }
-  | { path: "LOGIN" };
+  | { path: "LOGIN" }
+  | { path: "LOGIN_PRN"; prn: string };
 
 function hashCode(challengeTarget: string, code: string): string {
   return createHmac("sha256", process.env.NEXTAUTH_SECRET ?? "dev").update(`${challengeTarget}:${code}`).digest("hex");
@@ -30,7 +31,7 @@ export async function createOtpChallenge(input: { target: string; channel: OtpCh
     data: {
       target: input.target,
       channel: input.channel,
-      purpose: input.meta.path === "LOGIN" ? "LOGIN" : "REGISTER",
+      purpose: input.meta.path === "LOGIN" || input.meta.path === "LOGIN_PRN" ? "LOGIN" : "REGISTER",
       codeHash: hashCode(input.target, code),
       meta: JSON.stringify(input.meta),
       expiresAt: new Date(Date.now() + OTP_TTL_MS),

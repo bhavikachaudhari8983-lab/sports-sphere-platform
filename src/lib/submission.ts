@@ -8,6 +8,7 @@ import { getAgeCategory } from "./registration";
 import { isMinor } from "./age";
 import { CHECK_LABEL, type CheckType, type DocType } from "./constants";
 import { formatDob, normaliseName } from "./utils";
+import { messages, notifyStudent } from "./notifications";
 
 type Full = Student & { documents: Document[]; registrations: Registration[]; checks: VerificationCheck[] };
 
@@ -16,7 +17,10 @@ export async function validateSubmission(s: Full): Promise<Record<string, string
   const errors: Record<string, string> = {};
   const has = (t: DocType) => s.documents.some((d) => d.type === t);
 
-  if (!s.dobLocked || !s.dob || !s.identityKey) errors["identity.verified"] = "Verify your identity first";
+  // Manual-route identities get their identity key only after the desk check, so they're allowed through here
+  // without one; they can't be VERIFIED until an official has checked the original ID (see verificationBlockers).
+  const identityReady = s.dobLocked && !!s.dob && (!!s.identityKey || (s.dobSource === "MANUAL" && s.documents.some((d) => d.type === "ID_PROOF")));
+  if (!identityReady) errors["identity.verified"] = "Verify your identity first";
   if (s.studentType === "INTERNATIONAL") {
     if (!has("PASSPORT")) errors["identity.PASSPORT"] = "Upload your passport photo page";
     if (!has("VISA")) errors["identity.VISA"] = "Upload your student visa";
@@ -92,8 +96,12 @@ export async function submitRegistration(studentId: string, actor: Actor, ip: st
   if (Object.keys(errors).length) throw new ApiError(400, "Some required information is missing.", errors);
 
   // One person = one profile (the unique index also enforces this).
-  const dup = await prisma.student.findFirst({ where: { identityKey: s.identityKey, NOT: { id: s.id } }, select: { id: true } });
-  if (dup) throw new ApiError(409, "A registration already exists for this person.");
+  // (Skipped while the key is still empty, i.e. a manual identity awaiting its desk check: "identityKey: null" would
+  // otherwise match every other key-less registration.)
+  if (s.identityKey) {
+    const dup = await prisma.student.findFirst({ where: { identityKey: s.identityKey, NOT: { id: s.id } }, select: { id: true } });
+    if (dup) throw new ApiError(409, "A registration already exists for this person.");
+  }
 
   // Outside students: link to a college record; untrusted colleges need admin confirmation.
   let collegeId = s.collegeId;
@@ -136,5 +144,6 @@ export async function submitRegistration(studentId: string, actor: Actor, ip: st
   });
   await audit({ actor, action: "REGISTRATION_SUBMITTED", studentId: s.id, summary: `Registration submitted (${s.registrations.length} event${s.registrations.length === 1 ? "" : "s"})`, ip });
   await audit({ actor: { type: "SYSTEM" }, action: "STATUS_CHANGED", studentId: s.id, summary: `Status DRAFT → ${status}${reason ? " (auto-check mismatch)" : ""}`, details: reason ? { reason } : undefined, ip });
+  await notifyStudent(s.id, "REGISTRATION_SUBMITTED", reason ? messages.submittedFlagged(s.id, reason) : messages.submitted(s.id));
   return status;
 }

@@ -7,7 +7,7 @@ import { audit } from "@/lib/audit";
 import { saveSettings, getSettings } from "@/lib/settings";
 import { deleteStudentData } from "@/lib/data-deletion";
 import { isoDate, email } from "@/lib/validation/common";
-import { EVENT_GENDERS, STAFF_ROLES } from "@/lib/constants";
+import { ADMIN_ROLES, EVENT_GENDERS, STAFF_ROLES, type StaffRole } from "@/lib/constants";
 import { slugify } from "@/lib/utils";
 
 const password = z.string().min(10, "At least 10 characters").max(100).regex(/[A-Z]/, "Include an uppercase letter").regex(/[a-z]/, "Include a lowercase letter").regex(/\d/, "Include a number");
@@ -129,6 +129,7 @@ export const POST = route(async (req) => {
       break;
     }
     case "staff-add": {
+      if (ADMIN_ROLES.includes(input.role) && staff.role !== "SUPER_ADMIN") throw new ApiError(403, "Only a super admin can create admin accounts.", { role: "Only a super admin can choose this role" });
       if (await prisma.staffUser.findUnique({ where: { email: input.email } })) throw new ApiError(409, "This email already has an account.", { email: "Already in use" });
       if (input.role === "COACH" && !input.sportId) throw new ApiError(400, "Choose the coach's sport.", { sportId: "Required for coaches" });
       await prisma.staffUser.create({ data: { name: input.name, email: input.email, role: input.role, sportId: input.role === "COACH" ? input.sportId : null, passwordHash: await bcrypt.hash(input.password, 12) } });
@@ -137,6 +138,13 @@ export const POST = route(async (req) => {
     }
     case "staff-update": {
       if (input.id === staff.id && input.active === false) throw new ApiError(400, "You can't deactivate your own account.");
+      const target = await prisma.staffUser.findUnique({ where: { id: input.id }, select: { role: true, active: true } });
+      if (!target) throw new ApiError(404, "Staff account not found");
+      // Admin accounts are managed only by a super admin, and the last active super admin can't be switched off.
+      if (ADMIN_ROLES.includes(target.role as StaffRole) && staff.role !== "SUPER_ADMIN") throw new ApiError(403, "Only a super admin can change admin accounts.");
+      if (target.role === "SUPER_ADMIN" && target.active && input.active === false && (await prisma.staffUser.count({ where: { role: "SUPER_ADMIN", active: true } })) <= 1) {
+        throw new ApiError(409, "This is the only active super admin. Make another super admin first.");
+      }
       const u = await prisma.staffUser.update({
         where: { id: input.id },
         data: { ...(input.active !== undefined ? { active: input.active } : {}), ...(input.password ? { passwordHash: await bcrypt.hash(input.password, 12) } : {}) },

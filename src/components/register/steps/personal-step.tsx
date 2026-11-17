@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Field, Input, LockedValue, Select, Textarea, fieldA11y } from "@/components/ui/field";
-import { BLOOD_GROUPS, GENDER_LABEL, type Gender } from "@/lib/constants";
+import { BLOOD_GROUPS, DOB_SOURCE_LABEL, GENDER_LABEL, type DobSource, type Gender } from "@/lib/constants";
 import { personalSchema } from "@/lib/validation/registration";
 import { formatDob } from "@/lib/utils";
 import { useStepValidator, useWizard } from "../wizard-context";
@@ -14,7 +14,7 @@ export function PersonalStep() {
   const { draft, setDraft } = useWizard();
   const p = draft.personal;
   const id = draft.identity;
-  const verifiedVia = id.dobSource === "PASSPORT" ? "Passport" : "DigiLocker";
+  const verifiedVia = DOB_SOURCE_LABEL[id.dobSource as DobSource] ?? "DigiLocker";
   const { values, set, validate, errorFor } = useSection("personal", {
     mobile: p.mobile ?? "",
     email: p.email ?? "",

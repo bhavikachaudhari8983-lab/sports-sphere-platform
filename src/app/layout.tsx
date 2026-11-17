@@ -1,13 +1,13 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, JetBrains_Mono, Montserrat } from "next/font/google";
+import { JetBrains_Mono, Lato } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { themeInitScript } from "@/components/layout/theme-toggle";
 import { APP_NAME } from "@/lib/constants";
 
-// Montserrat = MIT-WPU's heading typeface; Inter for highly legible body/UI text; JetBrains Mono for IDs & numbers.
-const montserrat = Montserrat({ subsets: ["latin"], weight: ["600", "700", "800"], style: ["normal", "italic"], variable: "--font-montserrat", display: "swap" });
-const inter = Inter({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-inter", display: "swap" });
+// Lato = MIT-WPU Brand Book 2026 digital typeface (p.12), used for headings and body, same as the official website.
+// Lato ships 400/700/900 (+ italic for the logo-style wordmark); JetBrains Mono stays for IDs & numbers only.
+const lato = Lato({ subsets: ["latin"], weight: ["400", "700", "900"], style: ["normal", "italic"], variable: "--font-lato", display: "swap" });
 const jetbrains = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "600"], variable: "--font-jetbrains", display: "swap" });
 
 export const metadata: Metadata = {
@@ -26,7 +26,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en-IN" suppressHydrationWarning className={`${montserrat.variable} ${inter.variable} ${jetbrains.variable}`}>
+    <html lang="en-IN" suppressHydrationWarning className={`${lato.variable} ${jetbrains.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>

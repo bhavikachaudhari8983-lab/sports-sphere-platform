@@ -29,6 +29,7 @@ export async function newPage(browser, width = 1280) {
   await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
   await page.setViewport({ width, height: 860, isMobile: width < 500, hasTouch: width < 500 });
   page.setDefaultTimeout(20_000);
+  await front(page);
   page.jsErrors = [];
   page.on("pageerror", (e) => page.jsErrors.push(`${new URL(page.url()).pathname}: ${e.message.split("\n")[0].slice(0, 160)}`));
   page.on("dialog", (d) => d.dismiss()); // never let a native alert/confirm block a test
@@ -36,12 +37,27 @@ export async function newPage(browser, width = 1280) {
 }
 
 export const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-export const go = (page, path) => page.goto(BASE + path, { waitUntil: "load" });
+// Chrome holds back animation frames in background tabs, so a tab left behind by another one runs
+// requestAnimationFrame work (e.g. "focus the first invalid field", React updates) late — even mid-typing.
+// Every navigation, click and step therefore brings its tab to the front first.
+let fronted = null;
+export async function front(page) {
+  if (!page || page === fronted || page.isClosed()) return;
+  await page.bringToFront();
+  fronted = page;
+}
+export const go = async (page, path) => {
+  await front(page);
+  return page.goto(BASE + path, { waitUntil: "load" });
+};
 export const path = (page) => new URL(page.url()).pathname;
 export const waitText = (page, text, timeout = 20_000) => page.waitForFunction((t) => document.body?.innerText.includes(t), { timeout }, text);
 export const waitPath = (page, p, timeout = 20_000) => page.waitForFunction((x) => location.pathname === x, { timeout }, p);
 export const hasText = (page, text) => page.evaluate((t) => document.body.innerText.includes(t), text);
-export const click = (page, selector, text) => page.locator(`${selector}::-p-text(${text})`).click();
+export const click = async (page, selector, text) => {
+  await front(page);
+  return page.locator(`${selector}::-p-text(${text})`).click();
+};
 /** Clicks the confirm (last) button of the open native-<dialog> modal. */
 export async function confirmDialog(page) {
   await page.waitForSelector("dialog[open]");
@@ -84,6 +100,7 @@ export function suite(name) {
   return {
     async step(label, page, fn) {
       try {
+        await front(page);
         const note = await fn();
         results.push({ ok: true, label, note });
       } catch (e) {

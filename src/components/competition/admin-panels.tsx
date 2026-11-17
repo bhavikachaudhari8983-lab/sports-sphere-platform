@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Award, Crown, Lock, Plus, Radio, Shuffle, Trash2, Unlock, UserMinus } from "lucide-react";
 import { Button, buttonClass } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { StatusPill } from "@/components/ui/status-pill";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Checkbox, Field, Input, Select, Textarea, fieldA11y } from "@/components/ui/field";
 import { useToast } from "@/components/ui/toast";
@@ -283,7 +284,113 @@ export type MatchView = {
   winner: string | null;
   scheduledAt: string | null;
   bye: boolean;
+  /** updatedAt when the page was loaded; a save is refused if the match changed since. */
+  version: string;
+  courtId: string | null;
+  durationMin: number | null;
+  statusReason: string | null;
+  scorer: { id: string; name: string } | null;
+  referee: { id: string; name: string } | null;
 };
+
+/** Options for scheduling a match: open courts, officials who can be assigned, the event's default match length. */
+export type ManageOptions = { courts: Array<{ id: string; label: string }>; officials: Array<{ id: string; label: string }>; defaultMinutes: number; knockout: boolean };
+
+/** ISO time → "YYYY-MM-DDTHH:mm" in Indian time, for <input type="datetime-local">. */
+const toIstInput = (iso: string | null) => (iso ? new Date(new Date(iso).getTime() + 5.5 * 3600_000).toISOString().slice(0, 16) : "");
+
+function MatchManage({ eventId, m, manage, onDone }: { eventId: string; m: MatchView; manage: ManageOptions; onDone: () => void }) {
+  const { run, busy, errors } = useCompOp(eventId);
+  const [sched, setSched] = useState({ at: toIstInput(m.scheduledAt), court: m.courtId ?? "", len: m.durationMin?.toString() ?? "" });
+  const [reason, setReason] = useState("");
+  const canPostpone = m.status === "SCHEDULED" || m.status === "LIVE";
+  const canCancel = (m.status === "SCHEDULED" || m.status === "POSTPONED") && !manage.knockout;
+  const canReinstate = m.status === "POSTPONED" || m.status === "CANCELLED";
+  const official = (duty: "SCOREKEEPER" | "REFEREE", current: { id: string } | null) => (
+    <Field id={`${duty}-${m.id}`} label={duty === "SCOREKEEPER" ? "Scorer" : "Referee"} hint={duty === "SCOREKEEPER" ? "Only this official can score the match (admins can too)." : undefined}>
+      <Select
+        {...fieldA11y(`${duty}-${m.id}`)}
+        value={current?.id ?? ""}
+        disabled={busy === `${duty}-${m.id}`}
+        onChange={(e) => void run({ op: "official", matchId: m.id, duty, staffId: e.target.value || null }, e.target.value ? "Official assigned" : "Official removed", `${duty}-${m.id}`)}
+      >
+        <option value="">Not assigned</option>
+        {manage.officials.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.label}
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
+  return (
+    <div className="space-y-4 rounded-lg border border-border bg-surface-2 p-3">
+      {m.status !== "CANCELLED" && (
+        <form
+          className="grid gap-3 sm:grid-cols-[1fr_1fr_8rem_auto] sm:items-end"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (await run({ op: "schedule", matchId: m.id, version: m.version, scheduledAt: sched.at, courtId: sched.court, durationMin: sched.len }, m.status === "POSTPONED" && sched.at ? "Match rescheduled" : "Schedule saved", `sch-${m.id}`)) onDone();
+          }}
+        >
+          <Field id={`at-${m.id}`} label="Date and time (Indian time)" error={errors.scheduledAt}>
+            <Input {...fieldA11y(`at-${m.id}`, errors.scheduledAt)} type="datetime-local" value={sched.at} onChange={(e) => setSched({ ...sched, at: e.target.value })} />
+          </Field>
+          <Field id={`court-${m.id}`} label="Court" error={errors.courtId}>
+            <Select {...fieldA11y(`court-${m.id}`, errors.courtId)} value={sched.court} onChange={(e) => setSched({ ...sched, court: e.target.value })}>
+              <option value="">No court</option>
+              {manage.courts.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field id={`len-${m.id}`} label="Length (min)" error={errors.durationMin}>
+            <Input {...fieldA11y(`len-${m.id}`, errors.durationMin)} type="number" min={5} max={600} inputMode="numeric" placeholder={String(manage.defaultMinutes)} value={sched.len} onChange={(e) => setSched({ ...sched, len: e.target.value })} />
+          </Field>
+          <Button type="submit" size="sm" loading={busy === `sch-${m.id}`}>
+            {m.status === "POSTPONED" ? "Reschedule" : "Save schedule"}
+          </Button>
+        </form>
+      )}
+      {manage.courts.length === 0 && m.status !== "CANCELLED" && (
+        <p className="text-small text-muted">
+          No courts yet. <Link href="/admin/venues" className="font-semibold underline underline-offset-4">Add venues and courts</Link> to schedule matches onto them.
+        </p>
+      )}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {official("SCOREKEEPER", m.scorer)}
+        {official("REFEREE", m.referee)}
+      </div>
+      {(canPostpone || canCancel || canReinstate) && (
+        <div className="flex flex-wrap items-end gap-2 border-t border-border pt-3">
+          {(canPostpone || canCancel) && (
+            <Field id={`reason-${m.id}`} label="Reason (shown to teams and spectators)" error={errors.reason} className="min-w-56 flex-1">
+              <Input {...fieldA11y(`reason-${m.id}`, errors.reason)} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Rain, court unavailable" />
+            </Field>
+          )}
+          {canPostpone && (
+            <Button size="sm" variant="outline" loading={busy === `pp-${m.id}`} onClick={async () => { if (await run({ op: "match-status", matchId: m.id, to: "POSTPONED", reason }, "Match postponed", `pp-${m.id}`)) onDone(); }}>
+              Postpone
+            </Button>
+          )}
+          {canCancel && (
+            <Button size="sm" variant="danger" loading={busy === `cx-${m.id}`} onClick={async () => { if (await run({ op: "match-status", matchId: m.id, to: "CANCELLED", reason }, "Match cancelled", `cx-${m.id}`)) onDone(); }}>
+              Cancel match
+            </Button>
+          )}
+          {canReinstate && (
+            <Button size="sm" variant="secondary" loading={busy === `re-${m.id}`} onClick={async () => { if (await run({ op: "match-status", matchId: m.id, to: "SCHEDULED", reason: "" }, "Match reinstated", `re-${m.id}`)) onDone(); }}>
+              Reinstate
+            </Button>
+          )}
+          {manage.knockout && (m.status === "SCHEDULED" || m.status === "POSTPONED") && <p className="w-full text-small text-muted">Knockout matches can&apos;t be cancelled, because someone must go through. Record a walkover with the final score instead.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function GenerateFixtures({ eventId, hasMatches, disabledReason }: { eventId: string; hasMatches: boolean; disabledReason?: string }) {
   const { run, busy } = useCompOp(eventId);
@@ -309,10 +416,12 @@ export function GenerateFixtures({ eventId, hasMatches, disabledReason }: { even
   );
 }
 
-export function MatchRow({ eventId, m, knockout, shootout }: { eventId: string; m: MatchView; knockout: boolean; shootout: boolean }) {
+export function MatchRow({ eventId, m, knockout, shootout, manage }: { eventId: string; m: MatchView; knockout: boolean; shootout: boolean; manage?: ManageOptions }) {
   const { run, busy, errors } = useCompOp(eventId);
   const done = m.status === "COMPLETED" || m.status === "WALKOVER";
   const [edit, setEdit] = useState(false);
+  const [managing, setManaging] = useState(false);
+  const courtLabel = m.courtId ? manage?.courts.find((c) => c.id === m.courtId)?.label ?? "Court (closed)" : null;
   const [v, setV] = useState({ h: m.homeScore?.toString() ?? "", a: m.awayScore?.toString() ?? "", ht: m.homeTiebreak?.toString() ?? "", at: m.awayTiebreak?.toString() ?? "" });
   const ready = !!m.home && !!m.away && !m.bye;
   const tie = v.h !== "" && v.h === v.a;
@@ -323,9 +432,14 @@ export function MatchRow({ eventId, m, knockout, shootout }: { eventId: string; 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-small text-muted">
         <span>{m.label}</span>
         {m.scheduledAt && <span>{formatDateTime(m.scheduledAt)}</span>}
+        {courtLabel && <span>{courtLabel}</span>}
         {m.status === "LIVE" && <Badge tone="danger" icon={<Radio className="size-3.5" aria-hidden />}>Live</Badge>}
+        {m.status === "POSTPONED" && <StatusPill status="POSTPONED" />}
+        {m.status === "CANCELLED" && <StatusPill status="CANCELLED" />}
         {m.bye && <Badge>Bye</Badge>}
+        {m.scorer && <span>Scorer: {m.scorer.name}</span>}
       </div>
+      {m.statusReason && <p className="text-small text-warning-fg">Reason: {m.statusReason}</p>}
       <div className="flex items-center gap-3">
         {side(m.home, m.winner === "HOME")}
         <span className="shrink-0 rounded-lg bg-surface-2 px-3 py-1 font-mono text-lg font-semibold tabular">
@@ -336,22 +450,30 @@ export function MatchRow({ eventId, m, knockout, shootout }: { eventId: string; 
       </div>
       {ready && !edit && (
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant={done ? "ghost" : "outline"} onClick={() => setEdit(true)}>
-            {done ? "Correct score" : "Enter final score"}
-          </Button>
-          {!done && (
+          {m.status !== "CANCELLED" && m.status !== "POSTPONED" && (
+            <Button size="sm" variant={done ? "ghost" : "outline"} onClick={() => setEdit(true)}>
+              {done ? "Correct score" : "Enter final score"}
+            </Button>
+          )}
+          {manage && !done && (
+            <Button size="sm" variant="ghost" aria-expanded={managing} onClick={() => setManaging(!managing)}>
+              {managing ? "Close" : "Manage"}
+            </Button>
+          )}
+          {!done && m.status !== "CANCELLED" && m.status !== "POSTPONED" && (
             <Link href={`/score/${m.id}`} className={buttonClass("ghost", "sm")}>
               <Radio className="size-4" aria-hidden /> Live scoring
             </Link>
           )}
         </div>
       )}
+      {managing && manage && <MatchManage eventId={eventId} m={m} manage={manage} onDone={() => undefined} />}
       {edit && (
         <form
           className="flex flex-wrap items-end gap-2"
           onSubmit={async (e) => {
             e.preventDefault();
-            const body = { op: "result", matchId: m.id, homeScore: v.h, awayScore: v.a, homeTiebreak: tie && knockout ? v.ht || null : null, awayTiebreak: tie && knockout ? v.at || null : null };
+            const body = { op: "result", matchId: m.id, version: m.version, homeScore: v.h, awayScore: v.a, homeTiebreak: tie && knockout ? v.ht || null : null, awayTiebreak: tie && knockout ? v.at || null : null };
             if (await run(body, "Result saved", `res-${m.id}`)) setEdit(false);
           }}
         >

@@ -42,6 +42,10 @@ export function IdCard() {
       c.height = H;
       const ctx = c.getContext("2d");
       if (!ctx) throw new Error("no canvas");
+      // next/font gives Lato a generated family name; read it from the CSS variable so the card uses the brand font.
+      const F = getComputedStyle(document.documentElement).getPropertyValue("--font-lato").trim() || "Lato, Arial, sans-serif";
+      const M = getComputedStyle(document.documentElement).getPropertyValue("--font-jetbrains").trim() || "monospace";
+      await document.fonts.ready;
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, W, H);
       ctx.fillStyle = "#FFF8F0";
@@ -49,7 +53,7 @@ export function IdCard() {
       ctx.fillStyle = "#EE7A2B";
       ctx.fillRect(0, 120, W, 12);
       ctx.fillStyle = "#ffffff";
-      ctx.font = "700 30px Montserrat, Arial";
+      ctx.font = `700 30px ${F}`;
       const logo = await loadImg("/brand/sports-sphere-logo.png");
       ctx.save();
       ctx.beginPath();
@@ -60,13 +64,13 @@ export function IdCard() {
       ctx.drawImage(logo, 30, 14, 92, 92);
       ctx.restore();
       ctx.fillStyle = "#0E1430";
-      ctx.font = "italic 800 30px Montserrat, Arial";
+      ctx.font = `italic 800 30px ${F}`;
       ctx.fillText("SPORTS", 140, 58);
       ctx.fillStyle = "#E4572A";
       ctx.fillText("SPHERE", 140 + ctx.measureText("SPORTS ").width, 58);
-      ctx.font = "400 22px Inter, Arial";
+      ctx.font = `400 22px ${F}`;
       ctx.fillStyle = "#475569";
-      ctx.font = "400 22px Inter, Arial";
+      ctx.font = `400 22px ${F}`;
       ctx.fillText(`SPORTS ID · ${card.meetName}`, 140, 96);
       if (card.photoDocId) {
         const photo = await loadImg(`/api/documents/${card.photoDocId}`);
@@ -80,28 +84,28 @@ export function IdCard() {
         ctx.restore();
       }
       ctx.fillStyle = "#0E1430";
-      ctx.font = "700 40px Montserrat, Arial";
+      ctx.font = `700 40px ${F}`;
       ctx.fillText(card.name, 300, 200);
       ctx.fillStyle = "#475569";
-      ctx.font = "400 18px Inter, Arial";
+      ctx.font = `400 18px ${F}`;
       ctx.fillText(card.university, 300, 226);
       ctx.fillStyle = "#64748B";
-      ctx.font = "600 18px Inter, Arial";
+      ctx.font = `600 18px ${F}`;
       ctx.fillText("AGE CATEGORY", 300, 250);
       ctx.fillStyle = "#15803D";
-      ctx.font = "700 40px Montserrat, Arial";
+      ctx.font = `700 40px ${F}`;
       ctx.fillText(card.ageCategory ?? "—", 300, 292);
       ctx.fillStyle = "#64748B";
-      ctx.font = "600 18px Inter, Arial";
+      ctx.font = `600 18px ${F}`;
       ctx.fillText("SPORTS", 300, 336);
       ctx.fillStyle = "#0F172A";
-      ctx.font = "500 24px Inter, Arial";
+      ctx.font = `500 24px ${F}`;
       card.sports.slice(0, 4).forEach((sp, i) => ctx.fillText(sp, 300, 370 + i * 32));
       ctx.fillStyle = "#0E1430";
-      ctx.font = "600 34px 'JetBrains Mono', monospace";
+      ctx.font = `600 34px ${M}`;
       ctx.fillText(card.sportsId, 36, 560);
       ctx.fillStyle = "#64748B";
-      ctx.font = "400 18px Inter, Arial";
+      ctx.font = `400 18px ${F}`;
       ctx.fillText(`Valid until ${card.validUntil} · Verify by scanning the QR`, 36, 600);
       const qr = await loadImg(card.qrDataUrl);
       ctx.drawImage(qr, W - 316, H - 316, 280, 280);

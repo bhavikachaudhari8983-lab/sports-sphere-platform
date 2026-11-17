@@ -157,10 +157,25 @@ async function advance(matchId: string) {
 export type ResultInput = { homeScore: number; awayScore: number; homeTiebreak?: number | null; awayTiebreak?: number | null; walkover?: "HOME" | "AWAY" | null };
 
 /** Final score of a match. Knockout ties need a tiebreak (penalties / super over) when the format allows one. */
-export async function recordResult(matchId: string, input: ResultInput, actor: Actor & { type: "STAFF" }, ip: string | null) {
+export type ResultGuard = {
+  /** Admin edits: the match version (updatedAt) the editor was looking at. Refused if someone changed it since. */
+  expectVersion?: string;
+  /** Live scorer finishing a match: refused if it's already finished (e.g. by a second phone). */
+  onlyIfOpen?: boolean;
+};
+
+export async function recordResult(matchId: string, input: ResultInput, actor: Actor & { type: "STAFF" }, ip: string | null, guard: ResultGuard = {}) {
   const m = await prisma.match.findUnique({ where: { id: matchId }, include: { event: true } });
   if (!m) throw new ApiError(404, "Match not found");
+  if (guard.onlyIfOpen && (m.status === "COMPLETED" || m.status === "WALKOVER")) {
+    throw new ApiError(409, `This match was already finished${m.scoredByName ? ` by ${m.scoredByName}` : ""}. Refresh to see the result.`);
+  }
+  if (guard.expectVersion && m.updatedAt.toISOString() !== guard.expectVersion) {
+    throw new ApiError(409, `This match was changed${m.scoredByName ? ` by ${m.scoredByName}` : " by someone else"} while you were editing. Refresh and check it before saving.`);
+  }
   if (m.bye) throw new ApiError(409, "This is a bye.");
+  if (m.status === "CANCELLED") throw new ApiError(409, "This match is cancelled. Reinstate it before entering a result.");
+  if (m.status === "POSTPONED") throw new ApiError(409, "This match is postponed. Reschedule it before entering a result.");
   if (!(m.homeTeamId || m.homeStudentId) || !(m.awayTeamId || m.awayStudentId)) throw new ApiError(409, "Both sides aren't known yet — finish the earlier round first.");
   if (m.event.resultsFinal) throw new ApiError(409, "Results for this event are final. Reopen them before changing a score.");
   if (m.nextMatchId) {
@@ -198,11 +213,18 @@ export async function applyLiveTaps(matchId: string, taps: Array<{ clientId: str
   const m = await prisma.match.findUnique({ where: { id: matchId }, include: { event: true } });
   if (!m) throw new ApiError(404, "Match not found");
   if (m.status === "COMPLETED" || m.status === "WALKOVER") throw new ApiError(409, "This match is already finished.");
+  if (m.status === "POSTPONED" || m.status === "CANCELLED") throw new ApiError(409, `This match is ${m.status.toLowerCase()}. It can't be scored until the organiser reschedules it.`);
   if (!(m.homeTeamId || m.homeStudentId) || !(m.awayTeamId || m.awayStudentId)) throw new ApiError(409, "Both sides aren't known yet.");
   for (const t of taps) {
-    if (await prisma.scoreEvent.findUnique({ where: { clientId: t.clientId }, select: { id: true } })) continue;
     const at = new Date(t.at);
-    await prisma.scoreEvent.create({ data: { matchId, clientId: t.clientId, side: t.side, delta: t.delta, byId: actor.id, byName: actor.name, at: Number.isNaN(at.getTime()) ? new Date() : at } });
+    try {
+      // The unique clientId makes this atomic: a tap retried at the same moment by two requests is stored once,
+      // and the second insert is simply skipped (no separate "does it exist?" check that two requests could race).
+      await prisma.scoreEvent.create({ data: { matchId, clientId: t.clientId, side: t.side, delta: t.delta, byId: actor.id, byName: actor.name, at: Number.isNaN(at.getTime()) ? new Date() : at } });
+    } catch (e) {
+      if ((e as { code?: string }).code === "P2002") continue; // already stored
+      throw e;
+    }
   }
   const all = await prisma.scoreEvent.findMany({ where: { matchId }, orderBy: { at: "asc" } });
   let home = 0, away = 0;
@@ -222,6 +244,7 @@ export async function matchesFor(eventId: string) {
     where: { eventId },
     orderBy: [{ division: "asc" }, { round: "asc" }, { slot: "asc" }],
     include: {
+      court: { include: { venue: true } },
       homeTeam: { include: { school: true } }, awayTeam: { include: { school: true } },
       homeStudent: { select: { id: true, fullName: true, universityName: true, school: { select: { name: true } } } },
       awayStudent: { select: { id: true, fullName: true, universityName: true, school: { select: { name: true } } } },
@@ -229,7 +252,8 @@ export async function matchesFor(eventId: string) {
   });
 }
 
-export function sideOf(m: MatchWithSides, side: "HOME" | "AWAY") {
+/** Only the side fields are read, so callers needn't load anything else (e.g. the court). */
+export function sideOf(m: Pick<MatchWithSides, "homeTeam" | "awayTeam" | "homeStudent" | "awayStudent">, side: "HOME" | "AWAY") {
   const team = side === "HOME" ? m.homeTeam : m.awayTeam;
   const st = side === "HOME" ? m.homeStudent : m.awayStudent;
   if (team) return { key: `t:${team.id}`, name: team.name, short: team.shortName, institution: teamInstitution(team), teamId: team.id, studentId: null };

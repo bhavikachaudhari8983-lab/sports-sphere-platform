@@ -6,7 +6,7 @@ import { requireStaffPage } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { getAgeCategory } from "@/lib/registration";
 import { dobImpact, verificationBlockers } from "@/lib/workflow";
-import { CHECK_LABEL, DOC_LABEL, GENDER_LABEL, isDocType, isStatus, STUDENT_TYPE_LABEL, type CheckType, type Gender, type StudentType } from "@/lib/constants";
+import { CHECK_LABEL, DOB_SOURCE_LABEL, DOC_LABEL, GENDER_LABEL, ID_DOC_LABEL, isDocType, isStatus, STUDENT_TYPE_LABEL, type CheckType, type DobSource, type Gender, type IdDocType, type StudentType } from "@/lib/constants";
 import { formatDateTime, formatDob } from "@/lib/utils";
 import { isMinor } from "@/lib/age";
 import { Card, CardBody, CardHeader, DefinitionList } from "@/components/ui/card";
@@ -190,7 +190,7 @@ export default async function StudentDetail({ params }: { params: Promise<{ id: 
                     value: (
                       <span className="inline-flex items-center gap-1.5">
                         {formatDob(s.dob)} {s.dobLocked && <Lock className="size-3.5 text-muted" aria-label="Locked" />}
-                        <span className="text-small font-normal text-muted">({s.dobSource?.toLowerCase().replace("_", " ") ?? "unverified"})</span>
+                        <span className="text-small font-normal text-muted">({s.dobSource ? DOB_SOURCE_LABEL[s.dobSource as DobSource] ?? s.dobSource : "unverified"})</span>
                       </span>
                     ),
                   },
@@ -202,7 +202,15 @@ export default async function StudentDetail({ params }: { params: Promise<{ id: 
                         { label: "MRZ check", value: s.mrzValid ? "Valid" : "Not checked" },
                         { label: "Passport chip/MRZ at desk", value: s.passportDeskVerified ? `Verified ${formatDateTime(s.passportDeskVerifiedAt)}` : "Not yet" },
                       ]
-                    : [{ label: "Aadhaar (masked)", value: s.aadhaarLast4 ? <span className="font-mono">XXXX XXXX {s.aadhaarLast4}</span> : "—" }]),
+                    : [
+                        { label: "Aadhaar (masked)", value: s.aadhaarLast4 ? <span className="font-mono">XXXX XXXX {s.aadhaarLast4}</span> : "—" },
+                        ...(s.dobSource === "MANUAL"
+                          ? [
+                              { label: "Government ID", value: s.identityDocType ? ID_DOC_LABEL[s.identityDocType as IdDocType] ?? s.identityDocType : "—" },
+                              { label: "Original ID at desk", value: s.identityDocDeskVerified ? `Checked ${formatDateTime(s.identityDocDeskVerifiedAt)}` : "Not yet" },
+                            ]
+                          : []),
+                      ]),
                   { label: "Mobile", value: s.mobile },
                   { label: "Email", value: <span className="break-all">{s.email}</span> },
                   { label: "Address", value: s.address },

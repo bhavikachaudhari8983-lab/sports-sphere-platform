@@ -1,6 +1,6 @@
 import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
-import type { Role } from "@/lib/constants";
+import { roleSatisfies, type Role } from "@/lib/constants";
 
 // First line of defence. Every page and API route ALSO checks roles server-side (src/lib/rbac.ts).
 const RULES: Array<{ prefix: string; roles: Role[] }> = [
@@ -23,7 +23,7 @@ export default withAuth(
     const path = req.nextUrl.pathname;
     const rule = RULES.find((r) => path === r.prefix || path.startsWith(`${r.prefix}/`));
     const role = req.nextauth.token?.role;
-    if (rule && (!role || !rule.roles.includes(role))) {
+    if (rule && !roleSatisfies(role, rule.roles)) {
       if (path.startsWith("/api/")) {
         return role
           ? NextResponse.json({ error: "You do not have permission to do this." }, { status: 403 })

@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { signOut } from "next-auth/react";
 import {
+  CalendarRange,
+  MapPin,
   ClipboardCheck,
   HeartPulse,
   LayoutDashboard,
@@ -25,7 +27,7 @@ import {
 } from "lucide-react";
 import { Logo } from "./logo";
 import { ThemeToggle } from "./theme-toggle";
-import { ROLE_LABEL, type StaffRole } from "@/lib/constants";
+import { ROLE_LABEL, roleSatisfies, type StaffRole } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; roles: StaffRole[]; exact?: boolean };
@@ -33,8 +35,10 @@ type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; role
 const NAV: NavItem[] = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard, roles: ["ADMIN"], exact: true },
   { href: "/admin/ready", label: "Ready to approve", icon: ListChecks, roles: ["ADMIN"] },
+  { href: "/admin/tournaments", label: "Tournaments", icon: CalendarRange, roles: ["ADMIN"] },
   { href: "/admin/sports", label: "Sports & events", icon: Trophy, roles: ["ADMIN"] },
   { href: "/admin/competition", label: "Competition", icon: Medal, roles: ["ADMIN"] },
+  { href: "/admin/venues", label: "Venues & courts", icon: MapPin, roles: ["ADMIN"] },
   { href: "/admin/announcements", label: "Announcements", icon: Megaphone, roles: ["ADMIN"] },
   { href: "/desk", label: "Verification desk", icon: ClipboardCheck, roles: ["ADMIN", "OFFICIAL"] },
   { href: "/scan", label: "QR scanner", icon: ScanLine, roles: ["ADMIN", "OFFICIAL"] },
@@ -73,7 +77,7 @@ export function StaffShell({ user, children }: { user: { name: string; role: Sta
     });
   }
 
-  const items = NAV.filter((n) => n.roles.includes(user.role));
+  const items = NAV.filter((n) => roleSatisfies(user.role, n.roles));
 
   const nav = (isCollapsed: boolean) => (
     <ul className="space-y-1">
@@ -125,7 +129,7 @@ export function StaffShell({ user, children }: { user: { name: string; role: Sta
   return (
     <div className="min-h-dvh lg:flex">
       {/* Mobile top bar */}
-      <header className="sticky top-0 z-40 flex h-16 print:hidden items-center justify-between gap-2 border-b border-border bg-surface px-4 text-fg shadow-card lg:hidden">
+      <header className="sticky top-0 z-40 flex h-20 print:hidden items-center justify-between gap-2 border-b border-border bg-surface px-4 text-fg shadow-card lg:hidden">
         <button type="button" onClick={() => setMobileOpen(true)} aria-label="Open navigation" aria-expanded={mobileOpen} aria-controls="staff-drawer" className="-ml-2 grid size-11 place-items-center rounded-lg hover:bg-surface-2">
           <Menu className="size-6" aria-hidden />
         </button>

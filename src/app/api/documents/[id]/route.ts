@@ -3,7 +3,7 @@ import { getSessionUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { readStoredFile } from "@/lib/storage";
 import { audit, type Actor } from "@/lib/audit";
-import { DOC_ACCESS, DOC_LABEL, isDocType, isStaffRole } from "@/lib/constants";
+import { DOC_ACCESS, DOC_LABEL, isDocType, isStaffRole, roleSatisfies } from "@/lib/constants";
 
 /** The ONLY way to read an uploaded file. Checks role/ownership and logs every view. */
 export const GET = route<{ params: Promise<{ id: string }> }>(async (req, { params }) => {
@@ -20,7 +20,7 @@ export const GET = route<{ params: Promise<{ id: string }> }>(async (req, { para
   } else {
     const staff = await prisma.staffUser.findUnique({ where: { id: user.id } });
     if (!staff || !staff.active || !isStaffRole(staff.role)) throw new ApiError(401, "Please sign in.");
-    if (!DOC_ACCESS[doc.type].includes(staff.role)) throw new ApiError(403, "Your role cannot view this document.");
+    if (!roleSatisfies(staff.role, DOC_ACCESS[doc.type])) throw new ApiError(403, "Your role cannot view this document.");
     // Coaches: only approved players in their own sport.
     if (staff.role === "COACH") {
       const inSport = doc.student.registrations.some((r) => r.event.sportId === staff.sportId);

@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/client-api";
-import { ROLE_LABEL, STAFF_ROLES, type StaffRole } from "@/lib/constants";
+import { ADMIN_ROLES, ROLE_LABEL, STAFF_ROLES, type StaffRole } from "@/lib/constants";
 import { formatDateTime } from "@/lib/utils";
 
 type Op = Record<string, unknown> & { op: string };
@@ -415,7 +415,9 @@ function SportItem({ sport, ageCategories }: { sport: SportRow; ageCategories: A
 // ---------- Staff ----------
 type StaffRow = { id: string; name: string; email: string; role: string; active: boolean; lastLoginAt: string | null; sport: string | null };
 
-export function StaffPanel({ staff, sports, currentId }: { staff: StaffRow[]; sports: Array<{ id: string; name: string }>; currentId: string }) {
+export function StaffPanel({ staff, sports, currentId, isSuperAdmin }: { staff: StaffRow[]; sports: Array<{ id: string; name: string }>; currentId: string; isSuperAdmin: boolean }) {
+  // Admin and super-admin accounts can only be managed by a super admin (the server enforces this too).
+  const canManage = (role: string) => isSuperAdmin || !(ADMIN_ROLES as readonly string[]).includes(role);
   const { run, busy, errors } = useOp();
   const [add, setAdd] = useState({ name: "", email: "", role: "OFFICIAL" as StaffRole, password: "", sportId: "" });
   const [reset, setReset] = useState<StaffRow | null>(null);
@@ -434,10 +436,12 @@ export function StaffPanel({ staff, sports, currentId }: { staff: StaffRow[]; sp
                 {u.sport && ` (${u.sport})`} · last login {formatDateTime(u.lastLoginAt)}
               </p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => { setPw(""); setReset(u); }}>
-              Reset password
-            </Button>
-            {u.id !== currentId && (
+            {canManage(u.role) && (
+              <Button variant="ghost" size="sm" onClick={() => { setPw(""); setReset(u); }}>
+                Reset password
+              </Button>
+            )}
+            {u.id !== currentId && canManage(u.role) && (
               <Button variant="outline" size="sm" loading={busy === `st-${u.id}`} onClick={() => run({ op: "staff-update", id: u.id, active: !u.active }, u.active ? "Account deactivated" : "Account reactivated", `st-${u.id}`)}>
                 {u.active ? "Deactivate" : "Reactivate"}
               </Button>
@@ -461,7 +465,7 @@ export function StaffPanel({ staff, sports, currentId }: { staff: StaffRow[]; sp
         </Field>
         <Field id="st-role" label="Role">
           <Select {...fieldA11y("st-role")} value={add.role} onChange={(e) => setAdd({ ...add, role: e.target.value as StaffRole })}>
-            {STAFF_ROLES.map((r) => (
+            {STAFF_ROLES.filter((r) => canManage(r)).map((r) => (
               <option key={r} value={r}>
                 {ROLE_LABEL[r]}
               </option>

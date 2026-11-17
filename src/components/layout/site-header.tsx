@@ -9,12 +9,13 @@ import { ThemeToggle } from "./theme-toggle";
 import { cn } from "@/lib/utils";
 import { buttonClass } from "@/components/ui/button";
 import { staffHomeFor } from "@/lib/staff-home";
+import { roleSatisfies } from "@/lib/constants";
 
 const links = [
   { href: "/", label: "Home" },
+  { href: "/events", label: "Live & results" },
   { href: "/register", label: "Register" },
-  { href: "/events", label: "Results" },
-  { href: "/status", label: "My status" },
+  { href: "/status", label: "My account" },
   { href: "/privacy", label: "Privacy" },
 ];
 
@@ -26,7 +27,7 @@ export function SiteHeader() {
 
   return (
     <header className="sticky top-0 z-40 bg-surface text-fg shadow-card">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
+      <div className="mx-auto flex h-20 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
         <Logo />
         <nav aria-label="Main" className="hidden items-center gap-1 md:flex">
           {links.map((l) => {
@@ -53,7 +54,7 @@ export function SiteHeader() {
           {staffHome ? (
             <Link href={staffHome} className={buttonClass("outline", "sm")}>
               <ShieldCheck className="size-4" aria-hidden />
-              <span className="hidden sm:inline">{role === "ADMIN" ? "Dashboard" : "Staff area"}</span>
+              <span className="hidden sm:inline">{roleSatisfies(role, ["ADMIN"]) ? "Dashboard" : "Staff area"}</span>
             </Link>
           ) : (
             <Link href="/staff/login" aria-label="Staff login" className="flex min-h-11 items-center rounded-lg px-2 text-small font-semibold whitespace-nowrap text-primary hover:bg-surface-2 sm:px-3">

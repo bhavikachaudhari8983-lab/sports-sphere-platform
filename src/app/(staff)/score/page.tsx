@@ -17,21 +17,22 @@ const sides = {
   awayStudent: { select: { id: true, fullName: true, universityName: true, school: { select: { name: true } } } },
 } as const;
 
-/** Matches an official can score now: live first, then upcoming ones whose two sides are known. */
+/** Matches to score now: live first, then upcoming. Officials see only the matches they are the scorer of; admins see all. */
 export default async function ScoreList() {
-  await requireStaffPage(["ADMIN", "OFFICIAL"], "/score");
+  const me = await requireStaffPage(["ADMIN", "OFFICIAL"], "/score");
+  const mineOnly = me.role === "OFFICIAL";
   const matches = await prisma.match.findMany({
-    where: { bye: false, status: { in: ["LIVE", "SCHEDULED"] }, OR: [{ homeTeamId: { not: null } }, { homeStudentId: { not: null } }], AND: [{ OR: [{ awayTeamId: { not: null } }, { awayStudentId: { not: null } }] }] },
+    where: { bye: false, status: { in: ["LIVE", "SCHEDULED"] }, ...(mineOnly ? { officials: { some: { staffId: me.id, duty: "SCOREKEEPER" } } } : {}), OR: [{ homeTeamId: { not: null } }, { homeStudentId: { not: null } }], AND: [{ OR: [{ awayTeamId: { not: null } }, { awayStudentId: { not: null } }] }] },
     orderBy: [{ status: "asc" }, { scheduledAt: "asc" }],
     take: 60,
-    include: { event: { include: { sport: true } }, ...sides },
+    include: { event: { include: { sport: true } }, court: { include: { venue: true } }, ...sides },
   });
   const ordered = [...matches.filter((m) => m.status === "LIVE"), ...matches.filter((m) => m.status !== "LIVE")];
   return (
     <div className="space-y-6">
-      <PageHeader title="Live scoring" description="Pick a match and score it from your phone. Works with a weak signal — taps are kept on the phone until they reach the server." />
+      <PageHeader title={mineOnly ? "My matches" : "Live scoring"} description={mineOnly ? "The matches you are the scorer for. Score from your phone: taps are kept on the phone until they reach the server, so a weak signal is fine." : "Every match that can be scored now. Officials only see the matches they are assigned to."} />
       {ordered.length === 0 ? (
-        <EmptyState icon={<Radio className="size-7" aria-hidden />} title="No matches to score" description="Matches appear here once an admin generates fixtures." />
+        <EmptyState icon={<Radio className="size-7" aria-hidden />} title={mineOnly ? "No matches assigned to you" : "No matches to score"} description={mineOnly ? "When the organiser makes you the scorer for a match, it appears here with its court and time." : "Matches appear here once fixtures are generated."} />
       ) : (
         <ul className="space-y-2">
           {ordered.map((m) => (
@@ -45,7 +46,12 @@ export default async function ScoreList() {
                   <span className="block font-semibold break-words">
                     {sideOf(m, "HOME")?.name} <span className="text-muted">vs</span> {sideOf(m, "AWAY")?.name}
                   </span>
-                  {m.scheduledAt && <span className="block text-small text-muted">{formatDateTime(m.scheduledAt)}</span>}
+                  {(m.scheduledAt || m.court) && (
+                    <span className="block text-small text-muted">
+                      {m.scheduledAt ? formatDateTime(m.scheduledAt) : "Time to be set"}
+                      {m.court ? ` · ${m.court.venue.name} · ${m.court.name}` : ""}
+                    </span>
+                  )}
                 </span>
                 {m.status === "LIVE" && (
                   <Badge tone="danger" icon={<Radio className="size-3.5" aria-hidden />}>

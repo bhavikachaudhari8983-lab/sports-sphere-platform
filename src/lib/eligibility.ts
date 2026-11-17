@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { ageOn } from "./age";
 import { getSettings } from "./settings";
+import { registrationWindowProblem } from "./tournaments";
 
 type RegIn = { eventId?: unknown; weightCategoryId?: unknown };
 export type ValidReg = { eventId: string; weightCategoryId: string | null };
@@ -33,7 +34,12 @@ export async function entryCounts(eventIds: string[], excludeStudentId?: string)
  * Checks events exist, are active, match the athlete's verified gender and age, have places left,
  * aren't duplicated, and (for weight-category sports) carry a weight class of the same sport and gender.
  */
-export async function validateRegistrations(input: unknown[], who: { studentId: string; gender: string | null; dob: string | null }, opts: { requireWeight: boolean }) {
+export async function validateRegistrations(
+  input: unknown[],
+  who: { studentId: string; gender: string | null; dob: string | null },
+  /** checkWindow: false only when an admin approves a change the student asked for while registration was open. */
+  opts: { requireWeight: boolean; checkWindow?: boolean },
+) {
   const errors: Record<string, string> = {};
   const valid: ValidReg[] = [];
   const items = input.slice(0, 4) as RegIn[];
@@ -41,7 +47,7 @@ export async function validateRegistrations(input: unknown[], who: { studentId: 
 
   const ids = items.map((i) => String(i.eventId ?? ""));
   const [events, settings, taken] = await Promise.all([
-    prisma.event.findMany({ where: { id: { in: ids }, active: true }, include: { ageCategory: true, sport: { include: { weightCategories: true } } } }),
+    prisma.event.findMany({ where: { id: { in: ids }, active: true }, include: { ageCategory: true, tournament: true, sport: { include: { weightCategories: true } } } }),
     getSettings(),
     entryCounts(ids, who.studentId),
   ]);
@@ -51,6 +57,8 @@ export async function validateRegistrations(input: unknown[], who: { studentId: 
     const key = `registrations.${idx}`;
     if (!ev || !ev.sport.active) return void (errors[key] = "This event is no longer available");
     if (valid.some((v) => v.eventId === ev.id)) return;
+    const closed = opts.checkWindow === false ? null : registrationWindowProblem(ev.tournament);
+    if (closed) return void (errors[key] = closed);
     const why = eventIneligibility(ev, { gender: who.gender, dob: who.dob, cutoff: settings.ageCutoffDate });
     if (why) return void (errors[key] = why);
     if (ev.maxEntries != null && (taken.get(ev.id) ?? 0) >= ev.maxEntries) return void (errors[key] = `${ev.name} is full (${ev.maxEntries} entries)`);

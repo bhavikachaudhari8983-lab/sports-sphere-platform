@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { requireStaffPage } from "@/lib/rbac";
+import { plannedMinutes } from "@/lib/match-management";
 import { prisma } from "@/lib/prisma";
 import { entrantsFor, matchesFor, sideOf, standings, suggestPlacings } from "@/lib/competition";
 import { eligiblePlayers, representsLabel } from "@/lib/teams";
@@ -22,7 +23,7 @@ export default async function CompetitionEvent({ params }: { params: Promise<{ e
   const ev = await prisma.event.findUnique({ where: { id: eventId }, include: { sport: true, ageCategory: true } });
   if (!ev) notFound();
   const format = isFormat(ev.format) ? ev.format : null;
-  const [teams, schools, matches, entrants, placings, certs, visiting] = await Promise.all([
+  const [teams, schools, matches, entrants, placings, certs, visiting, courts, officials, duties, matchExtras] = await Promise.all([
     prisma.team.findMany({
       where: { eventId },
       orderBy: { name: "asc" },
@@ -34,7 +35,14 @@ export default async function CompetitionEvent({ params }: { params: Promise<{ e
     prisma.placing.findMany({ where: { eventId }, orderBy: [{ division: "asc" }, { position: "asc" }] }),
     prisma.certificate.findMany({ where: { eventId }, orderBy: [{ kind: "asc" }, { recipient: "asc" }] }),
     prisma.student.findMany({ where: { status: "APPROVED", studentType: { not: "OUR_INDIAN" }, isOurUniversity: false, registrations: { some: { eventId } } }, select: { universityName: true }, distinct: ["universityName"] }),
+    prisma.court.findMany({ where: { active: true, venue: { active: true } }, include: { venue: true }, orderBy: [{ venue: { name: "asc" } }, { name: "asc" }] }),
+    prisma.staffUser.findMany({ where: { active: true, role: { in: ["OFFICIAL", "ADMIN", "SUPER_ADMIN"] } }, orderBy: [{ role: "asc" }, { name: "asc" }], select: { id: true, name: true, role: true } }),
+    prisma.matchOfficial.findMany({ where: { match: { eventId } }, include: { staff: { select: { name: true } } } }),
+    prisma.match.findMany({ where: { eventId }, select: { id: true, courtId: true, durationMin: true, statusReason: true } }),
   ]);
+  const extras = new Map(matchExtras.map((x) => [x.id, x]));
+  const dutyOf = (matchId: string, duty: string) => duties.find((d) => d.matchId === matchId && d.duty === duty);
+  const defaultMinutes = plannedMinutes({ durationMin: null, event: ev });
   const eligible = new Map(await Promise.all(teams.map(async (t) => [t.id, await eligiblePlayers(t.id)] as const)));
   const suggestion = !ev.resultsFinal && placings.length === 0 && format !== "RACE" ? await suggestPlacings(eventId) : null;
   const divisions = [...new Set((entrants.length ? entrants : []).map((e) => e.division))].sort((a, b) => (a ?? "").localeCompare(b ?? "", undefined, { numeric: true }));
@@ -48,7 +56,19 @@ export default async function CompetitionEvent({ params }: { params: Promise<{ e
     away: sideOf(m, "AWAY")?.name ?? null,
     homeScore: m.homeScore, awayScore: m.awayScore, homeTiebreak: m.homeTiebreak, awayTiebreak: m.awayTiebreak,
     status: m.status, winner: m.winner, scheduledAt: m.scheduledAt?.toISOString() ?? null, bye: m.bye,
+    version: m.updatedAt.toISOString(),
+    courtId: extras.get(m.id)?.courtId ?? null,
+    durationMin: extras.get(m.id)?.durationMin ?? null,
+    statusReason: extras.get(m.id)?.statusReason ?? null,
+    scorer: dutyOf(m.id, "SCOREKEEPER") ? { id: dutyOf(m.id, "SCOREKEEPER")!.staffId, name: dutyOf(m.id, "SCOREKEEPER")!.staff.name } : null,
+    referee: dutyOf(m.id, "REFEREE") ? { id: dutyOf(m.id, "REFEREE")!.staffId, name: dutyOf(m.id, "REFEREE")!.staff.name } : null,
   });
+  const manage = {
+    courts: courts.map((c) => ({ id: c.id, label: `${c.venue.name} · ${c.name}` })),
+    officials: officials.map((o) => ({ id: o.id, label: `${o.name}${o.role === "OFFICIAL" ? "" : " (admin)"}` })),
+    defaultMinutes,
+    knockout: format === "KNOCKOUT",
+  };
   const played = matches.filter((m) => !m.bye && (m.status === "COMPLETED" || m.status === "WALKOVER")).length;
   const real = matches.filter((m) => !m.bye).length;
   const initialPlacings = (placings.length ? placings : suggestion?.placings ?? []).map((p) => ({ division: p.division, position: p.position, entrantKey: p.teamId ? `t:${p.teamId}` : `s:${p.studentId}`, mark: "mark" in p ? (p.mark ?? "") : "" }));
@@ -121,7 +141,7 @@ export default async function CompetitionEvent({ params }: { params: Promise<{ e
                   )}
                   <ul className="grid gap-2 lg:grid-cols-2">
                     {ms.filter((m) => !m.bye).map((m) => (
-                      <MatchRow key={m.id} eventId={ev.id} m={view(m)} knockout={knockout} shootout={ev.shootout} />
+                      <MatchRow key={m.id} eventId={ev.id} m={view(m)} knockout={knockout} shootout={ev.shootout} manage={manage} />
                     ))}
                   </ul>
                 </section>

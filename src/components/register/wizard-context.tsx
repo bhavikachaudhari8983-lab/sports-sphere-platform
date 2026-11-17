@@ -8,10 +8,14 @@ import { api } from "@/lib/client-api";
 export type SaveState = "idle" | "saving" | "saved" | "error";
 type Validator = () => boolean | Promise<boolean>;
 
+/** Identity-verification routes offered to this student (only ones that can genuinely work). */
+export type VerifyOptions = { digilocker: boolean; aadhaarOffline: boolean; manual: boolean };
+
 type Ctx = {
   draft: RegistrationDraft;
   setDraft: (d: RegistrationDraft) => void;
   demo: boolean;
+  verifyOptions: VerifyOptions;
   saveState: SaveState;
   /** Field errors returned by the server for values it could not save. */
   skipped: Record<string, string>;
@@ -25,7 +29,7 @@ const WizardContext = createContext<Ctx | null>(null);
 
 const DEBOUNCE_MS = 900;
 
-export function WizardProvider({ initial, demo, children }: { initial: RegistrationDraft; demo: boolean; children: ReactNode }) {
+export function WizardProvider({ initial, demo, verifyOptions, children }: { initial: RegistrationDraft; demo: boolean; verifyOptions: VerifyOptions; children: ReactNode }) {
   const [draft, setDraft] = useState(initial);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [skipped, setSkipped] = useState<Record<string, string>>({});
@@ -102,7 +106,7 @@ export function WizardProvider({ initial, demo, children }: { initial: Registrat
   const runValidator = useCallback(async () => (validator.current ? await validator.current() : true), []);
 
   return (
-    <WizardContext.Provider value={{ draft, setDraft, demo, saveState, skipped, queueSave, flush: send, setValidator, runValidator }}>
+    <WizardContext.Provider value={{ draft, setDraft, demo, verifyOptions, saveState, skipped, queueSave, flush: send, setValidator, runValidator }}>
       {children}
     </WizardContext.Provider>
   );

@@ -191,13 +191,17 @@ export async function studentSuite(browser) {
     await waitText(a, "Delete my data?");
     await click(a, "dialog[open] button", "Cancel");
   });
-  await t.step("Bottom bar (phone): Home, Register, Results, Status", a, async () => {
+  await t.step("Bottom bar (phone): Home, Live, Register, Account", a, async () => {
     await a.setViewport({ width: 360, height: 760, isMobile: true, hasTouch: true });
     await go(a, "/");
-    for (const [label, to] of [["Results", "/events"], ["Status", "/status"], ["Register", "/register"], ["Home", "/"]]) {
+    for (const [label, to] of [["Live", "/events"], ["Account", "/status"], ["Home", "/"]]) {
       await click(a, 'nav[aria-label="Primary"] a', label);
       await waitPath(a, to);
     }
+    // This athlete is already registered, so "Register" takes them to My account (not a second registration).
+    // Checked last: the bar hides itself on the registration wizard, which has its own Back/Save bar.
+    await click(a, 'nav[aria-label="Primary"] a', "Register");
+    await waitPath(a, "/status");
   });
   await t.step("Theme toggle switches and is remembered", a, async () => {
     await go(a, "/");

@@ -13,6 +13,7 @@ import { Input, Select } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/feedback";
 import { DocumentViewer } from "@/components/admin/document-viewer";
+import { textMatch } from "@/lib/text-match";
 
 export const metadata: Metadata = { title: "Medical" };
 
@@ -25,7 +26,7 @@ export default async function MedicalPage({ searchParams }: { searchParams: Prom
   const where: Prisma.StudentWhereInput = {
     AND: [
       { status: { in: ["PENDING", "VERIFIED", "APPROVED", "FLAGGED"] } },
-      q ? { OR: [{ fullName: { contains: q } }, { sportsId: { contains: q.toUpperCase() } }] } : {},
+      q ? { OR: [{ fullName: textMatch(q) }, { sportsId: { contains: q.toUpperCase() } }] } : {},
       filter === "conditions" ? { medicalConditions: { not: null } } : {},
     ],
   };

@@ -4,6 +4,7 @@ import { isStatus, isStudentType } from "./constants";
 import { ageCategoryFor, type AgeCategoryLike } from "./age";
 import { getSettings } from "./settings";
 import { ENTRY_HOLDER } from "./eligibility";
+import { textMatch } from "@/lib/text-match";
 
 export type StudentFilters = {
   q?: string;
@@ -58,7 +59,7 @@ export async function studentWhere(f: StudentFilters): Promise<Prisma.StudentWhe
   if (f.sport) and.push({ registrations: { some: { event: { sportId: f.sport } } } });
   if (f.event) and.push({ registrations: { some: { eventId: f.event, ...(f.weight ? { weightCategoryId: f.weight } : {}) } } });
   else if (f.weight) and.push({ registrations: { some: { weightCategoryId: f.weight } } });
-  if (f.college) and.push({ universityName: { contains: f.college } });
+  if (f.college) and.push({ universityName: textMatch(f.college) });
   if (f.gender) and.push({ gender: f.gender });
   if (f.school) and.push({ schoolId: f.school });
   if (f.age) {
@@ -67,7 +68,7 @@ export async function studentWhere(f: StudentFilters): Promise<Prisma.StudentWhe
   }
   if (f.q) {
     const q = f.q;
-    and.push({ OR: [{ fullName: { contains: q } }, { prn: { contains: q.toUpperCase() } }, { passportNumber: { contains: q.toUpperCase() } }, { sportsId: { contains: q.toUpperCase() } }, { mobile: { contains: q } }, { email: { contains: q.toLowerCase() } }] });
+    and.push({ OR: [{ fullName: textMatch(q) }, { prn: { contains: q.toUpperCase() } }, { passportNumber: { contains: q.toUpperCase() } }, { sportsId: { contains: q.toUpperCase() } }, { mobile: { contains: q } }, { email: { contains: q.toLowerCase() } }] });
   }
   return { AND: and };
 }

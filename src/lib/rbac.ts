@@ -4,7 +4,7 @@ import { authOptions } from "./auth";
 import { prisma } from "./prisma";
 import { ApiError } from "./api";
 import type { Actor } from "./audit";
-import { isStaffRole, type StaffRole } from "./constants";
+import { isStaffRole, roleSatisfies, type StaffRole } from "./constants";
 
 export type StaffSession = { id: string; name: string; role: StaffRole; sportId: string | null };
 
@@ -26,7 +26,7 @@ export async function requireStaffPage(roles: readonly StaffRole[], callbackUrl:
   if (!user || user.role === "STUDENT") redirect(`/staff/login?callbackUrl=${encodeURIComponent(callbackUrl)}`);
   const staff = await loadStaff(user.id);
   if (!staff) redirect(`/staff/login?callbackUrl=${encodeURIComponent(callbackUrl)}`);
-  if (!roles.includes(staff.role)) redirect("/forbidden");
+  if (!roleSatisfies(staff.role, roles)) redirect("/forbidden");
   return staff;
 }
 
@@ -36,7 +36,7 @@ export async function requireStaffApi(roles: readonly StaffRole[]): Promise<Staf
   if (!user || user.role === "STUDENT") throw new ApiError(401, "Please sign in.");
   const staff = await loadStaff(user.id);
   if (!staff) throw new ApiError(401, "Please sign in.");
-  if (!roles.includes(staff.role)) throw new ApiError(403, "You do not have permission to do this.");
+  if (!roleSatisfies(staff.role, roles)) throw new ApiError(403, "You do not have permission to do this.");
   return staff;
 }
 

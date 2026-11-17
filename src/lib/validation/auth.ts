@@ -15,6 +15,7 @@ export const sendOtpSchema = z.union([
   z.object({ path: z.literal("C"), channel: z.literal("EMAIL"), email }),
   z.object({ path: z.literal("LOGIN"), channel: z.literal("SMS"), mobile: anyMobile }),
   z.object({ path: z.literal("LOGIN"), channel: z.literal("EMAIL"), email }),
+  z.object({ path: z.literal("LOGIN_PRN"), prn, channel: z.enum(["SMS", "EMAIL"]) }),
 ]);
 export type SendOtpInput = z.input<typeof sendOtpSchema>;
 

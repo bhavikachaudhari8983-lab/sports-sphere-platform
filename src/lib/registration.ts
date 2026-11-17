@@ -10,6 +10,7 @@ import { normaliseName, maskPhone } from "./utils";
 import { isDocType, isStatus, isStudentType, UNIVERSITY_NAME, type CheckType } from "./constants";
 import { erpService, passportService, admissionsService, type BinaryFile, type DigiLockerProfile } from "@/services";
 import type { RegistrationDraft } from "./registration-types";
+import { registrationWindowProblem } from "./tournaments";
 
 type CheckInput = { type: CheckType; passed: boolean; expected?: string | null; actual?: string | null; details?: string };
 
@@ -51,29 +52,37 @@ function assertEditable(student: Student) {
   if (student.status !== "DRAFT") throw new ApiError(409, "This registration has already been submitted and can no longer be edited.");
 }
 
-/** Path A & B: apply a DigiLocker e-KYC profile. DOB becomes locked. */
-export async function applyDigiLockerProfile(student: Student, profile: DigiLockerProfile, actor: Actor, ip: string | null) {
+/** Host-university students: compare a name + DOB against the university record (an extra check, never a substitute). */
+async function erpChecks(student: Student, name: string, dob: string, sourceLabel: string): Promise<CheckInput[]> {
+  if (student.studentType !== "OUR_INDIAN" || !student.prn) return [];
+  const erp = await erpService.findStudentByPrn(student.prn);
+  if (!erp) return [];
+  const nameOk = normaliseName(erp.name) === normaliseName(name);
+  const dobOk = erp.dob === dob;
+  const erpPhoto = await erpService.getStudentPhoto(student.prn);
+  if (erpPhoto) await storeServiceFile(student.id, "REFERENCE_PHOTO", "ERP", erpPhoto);
+  return [
+    { type: "ERP_NAME_MATCH", passed: nameOk, expected: erp.name, actual: name, details: nameOk ? undefined : `Name from ${sourceLabel} differs from the university record` },
+    { type: "ERP_DOB_MATCH", passed: dobOk, expected: erp.dob, actual: dob, details: dobOk ? undefined : `Date of birth from ${sourceLabel} differs from the university record` },
+  ];
+}
+
+export type VerifiedSource = "DIGILOCKER" | "AADHAAR_OFFLINE";
+const SOURCE_LABEL: Record<VerifiedSource, string> = { DIGILOCKER: "DigiLocker", AADHAAR_OFFLINE: "Aadhaar Offline e-KYC" };
+
+/**
+ * Paths A & B: apply an identity verified by a Government source (DigiLocker or Aadhaar Offline e-KYC).
+ * The same rules apply to every Indian student. DOB becomes locked.
+ */
+export async function applyVerifiedIndianProfile(student: Student, profile: DigiLockerProfile, source: VerifiedSource, actor: Actor, ip: string | null) {
   assertEditable(student);
   if (student.studentType === "INTERNATIONAL") throw new ApiError(400, "International students verify with a passport.");
   if (student.dobLocked) throw new ApiError(409, "Your identity is already verified. Only an admin can change verified details.");
 
   const identityKey = indianIdentityKey(profile.aadhaarLast4, profile.name, profile.dob);
-  await assertNotDuplicate(identityKey, student, "this DigiLocker identity", ip);
+  await assertNotDuplicate(identityKey, student, `this ${SOURCE_LABEL[source]} identity`, ip);
 
-  const checks: CheckInput[] = [];
-  if (student.studentType === "OUR_INDIAN" && student.prn) {
-    const erp = await erpService.findStudentByPrn(student.prn);
-    if (erp) {
-      const nameOk = normaliseName(erp.name) === normaliseName(profile.name);
-      const dobOk = erp.dob === profile.dob;
-      checks.push(
-        { type: "ERP_NAME_MATCH", passed: nameOk, expected: erp.name, actual: profile.name, details: nameOk ? undefined : "Name on DigiLocker differs from the university record" },
-        { type: "ERP_DOB_MATCH", passed: dobOk, expected: erp.dob, actual: profile.dob, details: dobOk ? undefined : "Date of birth on DigiLocker differs from the university record" },
-      );
-      const erpPhoto = await erpService.getStudentPhoto(student.prn);
-      if (erpPhoto) await storeServiceFile(student.id, "REFERENCE_PHOTO", "ERP", erpPhoto);
-    }
-  }
+  const checks: CheckInput[] = [...(await erpChecks(student, profile.name, profile.dob, SOURCE_LABEL[source]))];
   checks.push({ type: "DUPLICATE", passed: true, details: "No other profile with this identity" });
 
   await prisma.student.update({
@@ -82,7 +91,7 @@ export async function applyDigiLockerProfile(student: Student, profile: DigiLock
       identityKey,
       fullName: profile.name,
       dob: profile.dob,
-      dobSource: "DIGILOCKER",
+      dobSource: source,
       dobLocked: true,
       identityVerifiedAt: new Date(),
       gender: profile.gender,
@@ -91,16 +100,83 @@ export async function applyDigiLockerProfile(student: Student, profile: DigiLock
       wizardStep: Math.max(student.wizardStep, 1),
     },
   });
-  await storeServiceFile(student.id, "REFERENCE_PHOTO", "DIGILOCKER", profile.photo);
-  if (profile.class10Certificate) await storeServiceFile(student.id, "CLASS10", "DIGILOCKER", profile.class10Certificate);
+  await storeServiceFile(student.id, "REFERENCE_PHOTO", source, profile.photo);
+  if (profile.class10Certificate) await storeServiceFile(student.id, "CLASS10", source, profile.class10Certificate);
   await replaceChecks(student.id, checks);
 
   const failed = checks.filter((c) => !c.passed);
-  await audit({ actor, action: "IDENTITY_VERIFIED", studentId: student.id, summary: `Identity verified via DigiLocker (Aadhaar ••••${profile.aadhaarLast4})`, ip });
+  await audit({ actor, action: "IDENTITY_VERIFIED", studentId: student.id, summary: `Identity verified via ${SOURCE_LABEL[source]} (Aadhaar ••••${profile.aadhaarLast4})`, ip });
   if (failed.length) {
     await audit({ actor: { type: "SYSTEM" }, action: "VERIFICATION_MISMATCH", studentId: student.id, summary: `Auto-check mismatch: ${failed.map((f) => f.type).join(", ")}`, details: { failed }, ip });
   }
   return { mismatches: failed };
+}
+
+/** Kept for the existing DigiLocker route. */
+export function applyDigiLockerProfile(student: Student, profile: DigiLockerProfile, actor: Actor, ip: string | null) {
+  return applyVerifiedIndianProfile(student, profile, "DIGILOCKER", actor, ip);
+}
+
+export type ManualIdentityInput = { fullName: string; dob: string; gender: "MALE" | "FEMALE" | "OTHER"; aadhaarLast4: string; idDocType: string };
+
+/**
+ * Paths A & B, manual route: for students who can't use DigiLocker or Aadhaar Offline e-KYC (for example, no mobile
+ * number linked to their Aadhaar). The details are typed, with a Government photo ID uploaded. They are NOT trusted
+ * yet: the DOB is locked so the student can't keep changing it, but the registration can't be verified until an
+ * official has checked the original ID at the desk (see confirmIdentityDocument). Same rules for every Indian student.
+ */
+export async function applyManualIdentity(student: Student, input: ManualIdentityInput, actor: Actor, ip: string | null) {
+  assertEditable(student);
+  if (student.studentType === "INTERNATIONAL") throw new ApiError(400, "International students verify with a passport.");
+  if (student.dobLocked) throw new ApiError(409, "Your identity details are already saved. Only an admin can change them.");
+  const hasId = await prisma.document.count({ where: { studentId: student.id, type: "ID_PROOF" } });
+  if (!hasId) throw new ApiError(400, "Upload a photo of your Government ID first.", { ID_PROOF: "Upload your ID" });
+
+  const checks: CheckInput[] = await erpChecks(student, input.fullName, input.dob, "your ID");
+  await prisma.student.update({
+    where: { id: student.id },
+    data: {
+      // identityKey is only set once the original ID is checked at the desk, so unverified details can never block
+      // someone else's genuine registration.
+      identityKey: null,
+      fullName: input.fullName.trim(),
+      dob: input.dob,
+      dobSource: "MANUAL",
+      dobLocked: true,
+      identityVerifiedAt: null,
+      gender: input.gender,
+      aadhaarLast4: input.aadhaarLast4,
+      identityDocType: input.idDocType,
+      identityDocDeskVerified: false,
+      wizardStep: Math.max(student.wizardStep, 1),
+    },
+  });
+  await replaceChecks(student.id, checks);
+  const failed = checks.filter((c) => !c.passed);
+  await audit({ actor, action: "IDENTITY_SUBMITTED", studentId: student.id, summary: `Identity details entered with a Government ID (${input.idDocType}); to be checked at the desk`, ip });
+  if (failed.length) {
+    await audit({ actor: { type: "SYSTEM" }, action: "VERIFICATION_MISMATCH", studentId: student.id, summary: `Auto-check mismatch: ${failed.map((f) => f.type).join(", ")}`, details: { failed }, ip });
+  }
+  return { mismatches: failed };
+}
+
+/**
+ * Desk: an official has seen the original Government ID and it matches the details entered. Only now is the identity
+ * trusted: the one-person-one-profile key is set (blocking duplicates) and the identity counts as verified.
+ */
+export async function confirmIdentityDocument(studentId: string, actor: Actor & { type: "STAFF" }, ip: string | null) {
+  const s = await prisma.student.findUnique({ where: { id: studentId } });
+  if (!s) throw new ApiError(404, "Student not found");
+  if (s.dobSource !== "MANUAL") throw new ApiError(400, "Only students who entered their details with a Government ID need this check.");
+  if (s.identityDocDeskVerified) return;
+  if (!s.aadhaarLast4 || !s.fullName || !s.dob) throw new ApiError(409, "This registration has no identity details to check.");
+  const identityKey = indianIdentityKey(s.aadhaarLast4, s.fullName, s.dob);
+  await assertNotDuplicate(identityKey, s, "this identity", ip);
+  await prisma.student.update({
+    where: { id: studentId },
+    data: { identityKey, identityVerifiedAt: new Date(), identityDocDeskVerified: true, identityDocDeskVerifiedAt: new Date(), identityDocDeskVerifiedBy: actor.id },
+  });
+  await audit({ actor, action: "ID_DOCUMENT_VERIFIED", studentId, summary: `Original Government ID checked at the desk (${s.identityDocType ?? "ID"}, Aadhaar ••••${s.aadhaarLast4})`, ip });
 }
 
 /** Path C: passport details + MRZ check (+ admissions match for our international students). */
@@ -173,14 +249,20 @@ export async function getCatalog() {
   const sports = await prisma.sport.findMany({
     where: { active: true },
     orderBy: { name: "asc" },
-    include: { events: { where: { active: true }, orderBy: { name: "asc" }, include: { ageCategory: true } }, weightCategories: { orderBy: [{ gender: "asc" }, { maxKg: "asc" }] } },
+    include: { events: { where: { active: true }, orderBy: { name: "asc" }, include: { ageCategory: true, tournament: true } }, weightCategories: { orderBy: [{ gender: "asc" }, { maxKg: "asc" }] } },
   });
   return sports.map((s) => ({
     id: s.id,
     name: s.name,
     isWeightCategory: s.isWeightCategory,
     positions: s.positions ? s.positions.split(",").map((p) => p.trim()).filter(Boolean) : [],
-    events: s.events.map((e) => ({ id: e.id, name: e.name, gender: e.gender, eventDate: e.eventDate, venue: e.venue, ageLimit: e.ageCategory ? { name: e.ageCategory.name, maxAge: e.ageCategory.maxAge } : null })),
+    events: s.events.map((e) => ({
+      id: e.id, name: e.name, gender: e.gender, eventDate: e.eventDate, venue: e.venue,
+      ageLimit: e.ageCategory ? { name: e.ageCategory.name, maxAge: e.ageCategory.maxAge } : null,
+      tournament: e.tournament?.name ?? null,
+      /** Why registration is closed for this event right now, or null if open. */
+      closedReason: registrationWindowProblem(e.tournament),
+    })),
     // "+X kg" (maxKg null) sorts last
     weightCategories: [...s.weightCategories]
       .sort((a, b) => (a.gender === b.gender ? (a.maxKg ?? 999) - (b.maxKg ?? 999) : a.gender.localeCompare(b.gender)))
@@ -218,6 +300,7 @@ export async function getDraftDto(studentId: string): Promise<RegistrationDraft 
       passportNumber: s.passportNumber,
       nationality: s.nationality,
       passportExpiry: s.passportExpiry,
+      identityDocType: s.identityDocType,
     },
     personal: {
       mobile: s.mobile,

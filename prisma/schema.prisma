@@ -16,7 +16,7 @@ model StaffUser {
   email        String    @unique
   name         String
   passwordHash String
-  role         String // ADMIN | OFFICIAL | MEDICAL | COACH
+  role         String // SUPER_ADMIN | ADMIN | OFFICIAL | MEDICAL | COACH (SUPER_ADMIN can do everything ADMIN can, plus manage admins)
   sportId      String? // coaches are linked to one sport
   sport        Sport?    @relation(fields: [sportId], references: [id], onDelete: SetNull)
   active       Boolean   @default(true)
@@ -26,6 +26,7 @@ model StaffUser {
 
   measurements Measurement[]
   weighIns     WeighIn[]
+  matchDuties  MatchOfficial[]
 }
 
 model Student {
@@ -37,10 +38,11 @@ model Student {
   // One person = one profile. sha256 of (aadhaarLast4|name|dob) or (PASSPORT|nationality|number).
   identityKey String? @unique
 
-  // Verified identity (never typed by the student for Indian students)
+  // Verified identity. Indian students: from DigiLocker or Aadhaar Offline e-KYC (never typed), or MANUAL:
+  // typed with an uploaded Government ID, and verified only once an official has checked the original at the desk.
   fullName        String?
   dob             String? // YYYY-MM-DD, locked after verification
-  dobSource       String? // DIGILOCKER | PASSPORT | ADMIN_CORRECTION
+  dobSource       String? // DIGILOCKER | AADHAAR_OFFLINE | MANUAL | PASSPORT | ADMIN_CORRECTION
   dobLocked       Boolean   @default(false)
   identityVerifiedAt DateTime?
   gender          String?
@@ -76,6 +78,11 @@ model Student {
   passportDeskVerified   Boolean   @default(false)
   passportDeskVerifiedAt DateTime?
   passportDeskVerifiedBy String?
+  // Manual identity route: which Government ID was used, and the desk check of the original document.
+  identityDocType          String? // AADHAAR_CARD | PASSPORT | PAN | DRIVING_LICENCE | VOTER_ID
+  identityDocDeskVerified   Boolean   @default(false)
+  identityDocDeskVerifiedAt DateTime?
+  identityDocDeskVerifiedBy String?
 
   // Sports
   playingPosition String?
@@ -105,6 +112,7 @@ model Student {
   measurements  Measurement[]
   weighIns      WeighIn[]
   deletionRequests DeletionRequest[]
+  notifications    Notification[]
   dobCorrections   DobCorrection[]
   ageConcerns      AgeConcern[]
   changeRequests   EventChangeRequest[]
@@ -183,6 +191,9 @@ model Event {
   id        String    @id @default(cuid())
   sportId   String
   sport     Sport     @relation(fields: [sportId], references: [id], onDelete: Cascade)
+  // The tournament this event belongs to (its registration window applies). A tournament with events can't be deleted.
+  tournamentId String?
+  tournament   Tournament? @relation(fields: [tournamentId], references: [id], onDelete: Restrict)
   name      String
   gender    String // MALE | FEMALE | MIXED
   eventDate String? // YYYY-MM-DD
@@ -213,6 +224,8 @@ model Event {
   placings           Placing[]
   certificates       Certificate[]
   announcements      Announcement[]
+
+  @@index([tournamentId])
 }
 
 model AgeCategory {
@@ -483,7 +496,11 @@ model Match {
   awayScore     Int?
   homeTiebreak  Int? // penalties / super over
   awayTiebreak  Int?
-  status        String    @default("SCHEDULED") // SCHEDULED | LIVE | COMPLETED | WALKOVER
+  status        String    @default("SCHEDULED") // SCHEDULED | LIVE | COMPLETED | WALKOVER | POSTPONED | CANCELLED
+  statusReason  String? // why a match was postponed or cancelled (shown publicly)
+  courtId       String?
+  court         Court?    @relation(fields: [courtId], references: [id], onDelete: SetNull)
+  durationMin   Int? // planned length incl. changeover; used for clash checks (default from the event format)
   winner        String? // HOME | AWAY | DRAW
   scheduledAt   DateTime?
   venue         String?
@@ -494,8 +511,10 @@ model Match {
   updatedAt     DateTime  @updatedAt
   createdAt     DateTime  @default(now())
   scoreEvents   ScoreEvent[]
+  officials     MatchOfficial[]
 
   @@index([eventId, round])
+  @@index([courtId, scheduledAt])
 }
 
 /// Every live-scoring tap. clientId makes offline replays idempotent.
@@ -571,4 +590,80 @@ model Announcement {
   createdAt   DateTime @default(now())
 
   @@index([createdAt])
+}
+
+/// A competition such as "Hoop It Up 2027" or "Sports Summit 2027". Groups events, sets the registration window, and
+/// keeps past seasons as history.
+model Tournament {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  season    String // e.g. "2026-27"
+  startDate String? // YYYY-MM-DD
+  endDate   String? // YYYY-MM-DD
+  /// Students can pick this tournament's events only between these times (null = no limit on that side).
+  registrationOpensAt  DateTime?
+  registrationClosesAt DateTime?
+  status    String   @default("DRAFT") // DRAFT (being set up, registration closed) | ACTIVE | ARCHIVED (history, registration closed)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  events    Event[]
+
+  @@index([status])
+}
+
+/// A personal notice to a student, shown in the portal and (when possible) emailed. Deleted with the student.
+model Notification {
+  id          String    @id @default(cuid())
+  studentId   String
+  student     Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  kind        String // REGISTRATION_SUBMITTED | REGISTRATION_APPROVED | REGISTRATION_REJECTED | REGISTRATION_FLAGGED
+  title       String
+  body        String
+  link        String?
+  readAt      DateTime?
+  emailStatus String    @default("NONE") // NONE (no verified email) | SENT | FAILED | NOT_CONFIGURED | DEMO
+  emailError  String?
+  createdAt   DateTime  @default(now())
+
+  @@index([studentId, createdAt])
+}
+
+/// A place where matches are played, e.g. "Dronacharya Sports Complex".
+model Venue {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  address   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  courts    Court[]
+}
+
+/// A court, field, pool or hall inside a venue. Matches are scheduled onto courts, and two matches can't overlap on one.
+model Court {
+  id        String   @id @default(cuid())
+  venueId   String
+  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Restrict)
+  name      String // e.g. "Basketball Court 1"
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  matches   Match[]
+
+  @@unique([venueId, name])
+}
+
+/// Who officiates a match. A SCOREKEEPER may enter the live score for that match; a REFEREE runs it.
+/// Officials see and score only the matches they are assigned to (admins can score any match).
+model MatchOfficial {
+  id           String    @id @default(cuid())
+  matchId      String
+  match        Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  staffId      String
+  staff        StaffUser @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  duty         String // SCOREKEEPER | REFEREE
+  assignedById String
+  createdAt    DateTime  @default(now())
+
+  @@unique([matchId, staffId, duty])
+  @@index([staffId])
 }

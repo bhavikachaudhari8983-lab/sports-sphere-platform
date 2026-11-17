@@ -7,6 +7,7 @@ import { indianIdentityKey } from "./identity";
 import type { Status } from "./constants";
 import { getAgeCategory } from "./registration";
 import { eventIneligibility } from "./eligibility";
+import { messages, notifyStudent } from "./notifications";
 
 async function load(id: string) {
   const s = await prisma.student.findUnique({ where: { id }, include: { college: true, measurements: { take: 1 } } });
@@ -26,6 +27,7 @@ export function verificationBlockers(s: Awaited<ReturnType<typeof load>>): strin
   if (!s.measurements.length) out.push("Record height and weight");
   if (s.studentType === "OUTSIDE_INDIAN" && !s.college?.trusted) out.push("College not yet confirmed by an admin");
   if (s.studentType === "INTERNATIONAL" && !s.passportDeskVerified) out.push("Tick “Passport chip/MRZ verified”");
+  if (s.dobSource === "MANUAL" && !s.identityDocDeskVerified) out.push("Check the original Government ID and tick “ID document verified”");
   return out;
 }
 
@@ -43,6 +45,7 @@ export async function approve(id: string, actor: Actor & { type: "STAFF" }, ip: 
   const sportsId = s.sportsId ?? (await uniqueSportsId());
   await setStatus(id, s.status, "APPROVED", actor, null, { approvedAt: new Date(), approvedById: actor.id, sportsId }, ip);
   await audit({ actor, action: "QR_ISSUED", studentId: id, summary: `QR Sports ID ${sportsId} issued`, ip });
+  await notifyStudent(id, "REGISTRATION_APPROVED", messages.approved(sportsId));
   return sportsId;
 }
 
@@ -59,12 +62,14 @@ export async function reject(id: string, reason: string, actor: Actor, ip: strin
   if (s.status === "DRAFT") throw new ApiError(409, "Draft registrations can't be rejected.");
   if (s.status === "REJECTED") throw new ApiError(409, "Already rejected.");
   await setStatus(id, s.status, "REJECTED", actor, reason, {}, ip);
+  await notifyStudent(id, "REGISTRATION_REJECTED", messages.rejected(reason));
 }
 
 export async function flag(id: string, reason: string, actor: Actor, ip: string | null) {
   const s = await load(id);
   if (s.status === "DRAFT") throw new ApiError(409, "Draft registrations can't be flagged.");
   await setStatus(id, s.status, "FLAGGED", actor, reason, {}, ip);
+  await notifyStudent(id, "REGISTRATION_FLAGGED", messages.flagged(reason));
 }
 
 /** Resolve a flag / reopen a rejection → back to PENDING for desk verification. */

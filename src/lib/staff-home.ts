@@ -1,9 +1,10 @@
 // Where each staff role starts, and which areas it may open. Plain module: usable on the server and in the browser.
 // Keep in step with RULES in src/middleware.ts (the server re-checks every request anyway).
 
-const HOME: Record<string, string> = { ADMIN: "/admin", OFFICIAL: "/desk", MEDICAL: "/medical", COACH: "/coach" };
+const HOME: Record<string, string> = { SUPER_ADMIN: "/admin", ADMIN: "/admin", OFFICIAL: "/desk", MEDICAL: "/medical", COACH: "/coach" };
 
 const AREAS: Record<string, string[]> = {
+  SUPER_ADMIN: ["/admin", "/desk", "/scan", "/score"],
   ADMIN: ["/admin", "/desk", "/scan", "/score"],
   OFFICIAL: ["/desk", "/scan", "/score"],
   MEDICAL: ["/medical"],

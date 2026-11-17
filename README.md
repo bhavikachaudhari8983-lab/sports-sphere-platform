@@ -63,7 +63,12 @@ DRAFT ──submit──▶ PENDING ──desk verify──▶ VERIFIED ──ad
    └────────▶ FLAGGED ───────┘ admin "Resolve flag"      any submitted status ──▶ REJECTED / FLAGGED (reason shown to student)
 ```
 
-* **DOB is never typed by Indian students.** It comes from DigiLocker (or the passport + MRZ check for international students), and is then locked. Coaches, officials and students can never change it. An admin can only **propose** a correction with a reason, and it takes effect when a **different admin** approves it. Both names, the old and new values and the reason go to the audit log. On approval the age category is recalculated, and if the athlete is no longer eligible for an event, the registration is flagged.
+* **One identity standard for every Indian student** (host university or any other). The date of birth comes from a Government source and is then locked:
+  * **DigiLocker** (fastest), or **Aadhaar Offline e-KYC** (the student uploads UIDAI's signed file with its share code). Both are verified instantly.
+  * **Government ID, checked at the desk**, for students who can't use either (for example, no mobile linked to their Aadhaar). The student types the details and uploads a photo of an Aadhaar card, passport, PAN, driving licence or voter ID. The DOB is locked but **not trusted**: the one-person-one-profile key is only set, and the registration can only be marked VERIFIED, after an official ticks "ID document verified" at `/desk` having seen the original (`confirmIdentityDocument` in `src/lib/registration.ts`).
+  * Host-university students' details are also compared with the university record as an extra check, never as a substitute. International students use the passport + MRZ check.
+  * Students only see the routes that genuinely work (`verificationOptions()` in `src/services/index.ts`). Today DigiLocker and Offline e-KYC are demo mocks, so outside demo mode only the Government ID route is offered until a real implementation is wired in. The real Offline e-KYC check must be written against UIDAI's official specification and tested with genuine files.
+* After that the DOB stays locked. Coaches, officials and students can never change it. An admin can only **propose** a correction with a reason, and it takes effect when a **different admin** approves it. Both names, the old and new values and the reason go to the audit log. On approval the age category is recalculated, and if the athlete is no longer eligible for an event, the registration is flagged.
 * **Fake-age detection.** At submission, a profile with the same name, Aadhaar last 4 and gender as an existing profile but a different DOB is flagged (`SAME_PERSON_OTHER_DOB`), and the other profile's audit log notes it. Coaches, officials and medical staff can raise an **age concern** (by Sports ID). It never changes the athlete's status by itself: an admin checks original documents and upholds it (the registration is flagged) or dismisses it.
 * **Event limits.** Each event can have an entry limit, a minimum squad size and an age limit (e.g. "U-23 only"), set in Settings → Sports. Students only see events they're eligible for, and full events are refused.
 * **After submission** students can withdraw from an event immediately, or request a change, which an admin approves or declines after eligibility and places are re-checked.
@@ -125,6 +130,18 @@ src/
 uploads/                 private files (git-ignored)
 ```
 
+## How host-university students sign in
+
+Students at the host university (e.g. MIT-WPU) can use any of these:
+
+| Method | How it works |
+|---|---|
+| **University Google account** (optional) | "Continue with your university Google account" on `/register` and `/status`. The student signs in on Google's own page with their university email and password; the portal never sees the password. Only Google-verified accounts on a configured university domain are accepted (`src/lib/university-sso.ts`). **Host university** (`UNIVERSITY_EMAIL_DOMAIN`): matched to the student record via `ErpService.findStudentByEmail`; a draft is created from the university records on first sign-in. **Visiting universities** (`PARTNER_UNIVERSITY_DOMAINS`, e.g. `COEP Pune:coeptech.ac.in`): the account verifies the student's email and university; identity is then checked in the normal outside-student flow. |
+| **PRN** | `/register` step 1 and the PRN tab on `/status`. A one-time code goes to the mobile or email held in the university records, never one the student types. |
+| Mobile / email | The code goes to the contact verified at registration (all students). |
+
+MIT-WPU's email runs on Google Workspace (`mitwpu.edu.in` mail is handled by Google). To switch on Google sign-in, the university's Workspace admin creates an OAuth client (type **Internal**) in Google Cloud. The redirect URI is `<NEXTAUTH_URL>/api/auth/callback/google`. Then set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `UNIVERSITY_EMAIL_DOMAIN="mitwpu.edu.in"`. The button stays hidden until all three are set. The portal never asks for a student's ERP password. Signing in with ERP (PRN + password) directly would need the university to provide single sign-on for the ERP (SAML or OpenID Connect).
+
 ## Replacing the mocks with real services
 
 Each external system has an interface in `src/services/types.ts`. Write a real class that implements it, then change the one line that wires it up in **`src/services/index.ts`**. Nothing else needs to change.
@@ -132,6 +149,7 @@ Each external system has an interface in `src/services/types.ts`. Write a real c
 | Interface | Mock file | Replace with |
 |---|---|---|
 | `ErpService` | `src/services/mock/erp.ts` | University ERP API (student by PRN, photo) |
+| `AadhaarOfflineService` | `src/services/mock/aadhaar-offline.ts` | Real check of UIDAI's Offline e-KYC ZIP: open it with the share code, verify UIDAI's XML signature against UIDAI's published certificate, read details only from the signed content. Build against UIDAI's official specification and genuine sample files. |
 | `DigiLockerService` | `src/services/mock/digilocker.ts` | DigiLocker Partner API (OAuth 2.0 + e-Aadhaar XML + issued documents). With the real OAuth redirect flow, `startConsent` returns the authorisation URL and `completeConsent` exchanges the code. The UI in `src/components/register/digilocker-dialog.tsx` then becomes a redirect instead of a modal. |
 | `OtpDeliveryService` | `src/services/mock/otp-delivery.ts` | SMS gateway (DLT-registered template) + transactional email |
 | `PassportVerificationService` | `src/services/mock/passport.ts` | MRZ/NFC passport reader SDK at the desk, or a document-verification provider. `src/lib/mrz.ts` already implements real ICAO check digits. |
@@ -151,5 +169,5 @@ Also remove `src/services/mock/demo-hints.ts` and `/api/demo/hints` (they are al
 * Approve requires VERIFIED. Verify requires a measurement, a confirmed college (outside students) and the desk passport tick (international students). A flagged registration must be resolved by an admin before desk verification.
 * Admins see everything except declared medical conditions (medical staff only). Coaches see only approved players in their own sport, and no ID or medical documents.
 * **Branding ("Light & warm").** The colours come from the official Sports Sphere logo (`public/brand/sports-sphere-logo.png`, also used as the favicon and on the ID card). Surfaces are white/cream, like the logo. The logo's navy ink `#0E1430` is used only for text and small solid elements (selected chips, secondary buttons). Primary buttons are logo orange `#EE7A2B` with navy text (6.4:1). Icon tiles and the active nav item use a soft orange tint (`#FFF1E6` / `#C2410C`). The "SPHERE" orange gradient is used for large headline text. The logo's ring colours (red, orange, yellow, green, water blue) appear in the header stripe and hero arcs. Charts use orange `#E8590C`. Dark mode is neutral charcoal (no blue tint). Sports IDs look like `SS-26-XXXXXX`. All tokens are in `src/app/globals.css`. **Replace the logo PNG with a high-resolution version (≥600 px or SVG) for a crisp hero.**
-* **Fonts** (Google Fonts via `next/font`): **Montserrat** 600/700/800 (+ italic for the logo-style wordmark) for headings (MIT-WPU's own heading face), **Inter** for body and form text, and **JetBrains Mono** for IDs, PRNs and measurements.
+* **Fonts** (Google Fonts via `next/font`): **Lato** 400/700/900 (+ italic for the logo-style wordmark) for headings, body and form text. Lato is the digital typeface in the MIT-WPU Brand Book 2026 (p.12), and the official website uses it too. **JetBrains Mono** is kept for IDs, PRNs and measurements. The PDF ID card and certificates embed the same Lato files from `assets/fonts/` (SIL Open Font Licence, `OFL.txt`) through `src/lib/pdf-fonts.ts`, and fall back to Helvetica if the files are missing.
 * Each student may enter at most 4 events. The age cutoff defaults to 1 Dec 2026 and retention to 365 days (both editable).

@@ -11,6 +11,10 @@ export const mockErpService: ErpService = {
     const student: ErpStudent = { prn: r.prn, name: r.name, dob: r.dob, gender: r.gender, phone: r.phone, email: r.email, course: r.course, year: r.year, schoolCode: schoolCodeFor(r.course) };
     return student;
   },
+  async findStudentByEmail(email) {
+    const r = ERP_STUDENTS.find((s) => s.email.toLowerCase() === email.trim().toLowerCase());
+    return r ? this.findStudentByPrn(r.prn) : null;
+  },
   async getStudentPhoto(prn) {
     const r = ERP_STUDENTS.find((s) => s.prn === prn.trim().toUpperCase());
     if (!r) return null;

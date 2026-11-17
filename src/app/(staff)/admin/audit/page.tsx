@@ -9,6 +9,7 @@ import { Input, Select } from "@/components/ui/field";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { AuditList } from "@/components/admin/audit-list";
 import { Pagination } from "@/components/admin/students-table";
+import { textMatch } from "@/lib/text-match";
 
 export const metadata: Metadata = { title: "Audit log" };
 const PAGE = 50;
@@ -24,7 +25,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
 
   const where: Prisma.AuditLogWhereInput = {
     AND: [
-      q ? { OR: [{ summary: { contains: q } }, { actorName: { contains: q } }, { studentId: q }, { ip: { contains: q } }] } : {},
+      q ? { OR: [{ summary: textMatch(q) }, { actorName: textMatch(q) }, { studentId: q }, { ip: { contains: q } }] } : {},
       action ? { action } : {},
       from ? { createdAt: { gte: new Date(`${from}T00:00:00+05:30`) } } : {},
       to ? { createdAt: { lte: new Date(`${to}T23:59:59+05:30`) } } : {},

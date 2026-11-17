@@ -5,7 +5,7 @@ import type { DraftDoc } from "./registration-types";
 import type { DocType } from "./constants";
 
 /** Types where a new upload replaces the previous one. */
-export const SINGLE_INSTANCE: readonly DocType[] = ["PHOTO", "SELFIE", "COLLEGE_ID", "BONAFIDE", "PASSPORT", "VISA", "FRRO", "MEDICAL_CERT", "GUARDIAN_CONSENT"];
+export const SINGLE_INSTANCE: readonly DocType[] = ["PHOTO", "SELFIE", "COLLEGE_ID", "BONAFIDE", "PASSPORT", "VISA", "FRRO", "MEDICAL_CERT", "GUARDIAN_CONSENT", "ID_PROOF"];
 export const MAX_ACHIEVEMENTS = 5;
 
 export function toDraftDoc(d: Document): DraftDoc {

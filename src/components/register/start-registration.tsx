@@ -11,6 +11,7 @@ import { api } from "@/lib/client-api";
 import { cn } from "@/lib/utils";
 import { OtpEntry } from "./otp-entry";
 import { DemoPanel, useDemoHints } from "./demo-panel";
+import { OrDivider, UniversitySsoButton, type SsoInfo } from "./university-sso-button";
 
 type Path = "A" | "B" | "C";
 type Sent = { challengeId: string; maskedTarget: string; demoCode?: string };
@@ -21,7 +22,7 @@ const PATHS: Array<{ id: Path; title: string; desc: string; icon: typeof Graduat
   { id: "C", title: "International / OCI / NRI", desc: "I hold a foreign passport or have no Aadhaar.", icon: Globe2, needs: "Passport, visa, FRRO permit" },
 ];
 
-export function StartRegistration({ demo }: { demo: boolean }) {
+export function StartRegistration({ demo, sso }: { demo: boolean; sso?: SsoInfo | null }) {
   const [path, setPath] = useState<Path | null>(null);
 
   return (
@@ -65,7 +66,7 @@ export function StartRegistration({ demo }: { demo: boolean }) {
             <button type="button" onClick={() => setPath(null)} className="-ml-2 inline-flex min-h-11 items-center gap-1 rounded-lg px-2 font-medium text-muted hover:text-fg">
               <ArrowLeft className="size-4" aria-hidden /> Choose a different option
             </button>
-            {path === "A" && <PathA demo={demo} />}
+            {path === "A" && <PathA demo={demo} sso={sso} />}
             {path === "B" && <PathB demo={demo} />}
             {path === "C" && <PathC demo={demo} />}
           </CardBody>
@@ -75,7 +76,7 @@ export function StartRegistration({ demo }: { demo: boolean }) {
   );
 }
 
-function PathA({ demo }: { demo: boolean }) {
+function PathA({ demo, sso }: { demo: boolean; sso?: SsoInfo | null }) {
   const hints = useDemoHints(demo);
   const [prn, setPrn] = useState("");
   const [lookup, setLookup] = useState<{ prn: string; maskedPhone: string; maskedEmail: string } | null>(null);
@@ -112,6 +113,12 @@ function PathA({ demo }: { demo: boolean }) {
         <h2 className="text-2xl">Step 1 of 2 · Find your university record</h2>
         <p className="text-muted">We&apos;ll send a code to the phone or email already on your university record.</p>
       </div>
+      {!lookup && sso && (
+        <>
+          <UniversitySsoButton sso={sso} callbackUrl="/register" />
+          <OrDivider />
+        </>
+      )}
       {!lookup ? (
         <form onSubmit={find} className="space-y-4" noValidate>
           <Field id="prn" label="PRN / enrollment number" error={error} hint="As printed on your university ID card, e.g. SS24CS006" required>

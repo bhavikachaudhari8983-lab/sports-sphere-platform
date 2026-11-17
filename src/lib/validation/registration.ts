@@ -1,8 +1,24 @@
 import { z } from "zod";
-import { aadhaar, anyMobile, bloodGroup, email, isoDate, nationality, passportNumber, personName } from "./common";
+import { aadhaar, anyMobile, bloodGroup, email, gender, isoDate, nationality, passportNumber, personName } from "./common";
+import { ID_DOC_TYPES } from "../constants";
 
 export const digiLockerStartSchema = z.object({ aadhaarNumber: aadhaar });
 export const digiLockerCompleteSchema = z.object({ requestId: z.string().uuid(), otp: z.string().trim().regex(/^\d{6}$/, "Enter the 6-digit DigiLocker OTP") });
+
+/** Manual identity route: typed details + an uploaded Government photo ID, checked at the desk later. */
+export const manualIdentitySchema = z
+  .object({
+    fullName: z.string().trim().min(2, "Enter your name exactly as on your ID").max(80).regex(/^[\p{L} .'-]+$/u, "Use letters only"),
+    dob: isoDate,
+    gender,
+    aadhaarLast4: z.string().trim().regex(/^\d{4}$/, "Enter the last 4 digits of your Aadhaar number"),
+    idDocType: z.enum(ID_DOC_TYPES, { error: "Choose which ID you uploaded" }),
+  })
+  .refine((v) => v.dob < new Date().toISOString().slice(0, 10), { path: ["dob"], message: "Date of birth must be in the past" })
+  .refine((v) => Number(v.dob.slice(0, 4)) >= new Date().getFullYear() - 60 && Number(v.dob.slice(0, 4)) <= new Date().getFullYear() - 10, { path: ["dob"], message: "Check the year of birth" });
+
+/** Aadhaar Offline e-KYC upload: the share code the student set on the UIDAI site (the ZIP file's password). */
+export const aadhaarOfflineSchema = z.object({ shareCode: z.string().trim().min(4, "Enter the share code you set on the UIDAI website").max(32) });
 
 export const passportSchema = z
   .object({

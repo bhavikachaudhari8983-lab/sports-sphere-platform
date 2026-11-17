@@ -9,6 +9,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { StandingsTable } from "@/components/competition/standings-table";
 import { AutoRefresh } from "@/components/competition/auto-refresh";
+import { StatusPill } from "@/components/ui/status-pill";
 
 export const dynamic = "force-dynamic";
 
@@ -99,8 +100,12 @@ export default async function PublicEvent({ params }: { params: Promise<{ eventI
                       <p className="flex flex-wrap gap-x-3 text-small text-muted">
                         <span>{m.roundLabel}</span>
                         {m.scheduledAt && <span>{formatDateTime(m.scheduledAt)}</span>}
+                        {m.court && <span>{m.court.venue.name} · {m.court.name}</span>}
                         {m.status === "LIVE" && <span className="font-semibold text-danger-fg">● Live</span>}
+                        {m.status === "POSTPONED" && <StatusPill status="POSTPONED" />}
+                        {m.status === "CANCELLED" && <StatusPill status="CANCELLED" />}
                       </p>
+                      {m.statusReason && (m.status === "POSTPONED" || m.status === "CANCELLED") && <p className="text-small text-warning-fg">{m.statusReason}</p>}
                       <p className="mt-1 flex items-center gap-3">
                         <span className={cn("min-w-0 flex-1 break-words", m.winner === "HOME" && "font-semibold")}>{h?.name ?? <span className="text-muted italic">To be decided</span>}</span>
                         <span className="shrink-0 font-mono font-semibold tabular">

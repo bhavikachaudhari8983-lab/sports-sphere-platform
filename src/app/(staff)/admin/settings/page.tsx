@@ -52,6 +52,7 @@ export default async function SettingsPage() {
       />
       <StaffPanel
         currentId={me.id}
+        isSuperAdmin={me.role === "SUPER_ADMIN"}
         sports={sports.map((s) => ({ id: s.id, name: s.name }))}
         staff={staff.map((u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, active: u.active, lastLoginAt: u.lastLoginAt?.toISOString() ?? null, sport: u.sport?.name ?? null }))}
       />

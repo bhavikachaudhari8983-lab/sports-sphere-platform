@@ -4,6 +4,7 @@ import { requireStaffApi, staffActor } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { audit } from "@/lib/audit";
 import { markVerified } from "@/lib/workflow";
+import { confirmIdentityDocument } from "@/lib/registration";
 
 const schema = z.discriminatedUnion("op", [
   z.object({
@@ -12,6 +13,7 @@ const schema = z.discriminatedUnion("op", [
     weightKg: z.coerce.number({ error: "Enter weight in kg" }).min(25, "Weight must be 25–250 kg").max(250, "Weight must be 25–250 kg"),
   }),
   z.object({ op: z.literal("passport"), verified: z.literal(true) }),
+  z.object({ op: z.literal("id-doc"), verified: z.literal(true) }),
   z.object({ op: z.literal("verify") }),
   z.object({
     op: z.literal("weigh-in"),
@@ -48,6 +50,10 @@ export const POST = route<{ params: Promise<{ id: string }> }>(async (req, { par
       await audit({ actor, action: "PASSPORT_VERIFIED", studentId: id, summary: `Passport chip/MRZ verified at desk (${s.nationality} ${s.passportNumber})`, ip });
       break;
     }
+    case "id-doc":
+      if (s.status === "REJECTED") throw new ApiError(409, "Registration is rejected.");
+      await confirmIdentityDocument(id, { type: "STAFF", id: staff.id, name: staff.name, role: staff.role }, ip);
+      break;
     case "verify":
       await markVerified(id, { type: "STAFF", id: staff.id, name: staff.name, role: staff.role }, ip);
       break;

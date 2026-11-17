@@ -1,5 +1,5 @@
 // Sign-in, sign-out and access problems for students and staff.
-import { click, confirmDialog, enterDemoOtp, go, hasText, newPage, path, staffLogin, studentLogin, suite, wait, waitPath, waitText } from "./helpers.mjs";
+import { click, confirmDialog, front, enterDemoOtp, go, hasText, newPage, path, staffLogin, studentLogin, suite, wait, waitPath, waitText } from "./helpers.mjs";
 
 export async function signinSuite(browser) {
   const t = suite("signin");
@@ -181,6 +181,7 @@ export async function signinSuite(browser) {
     await go(ad, "/admin/settings#staff");
     await ad.waitForSelector("#staff");
     const toggle = async (expect) => {
+      await front(ad);
       const btn = await ad.evaluateHandle(() => [...document.querySelectorAll("#staff li")].find((li) => li.innerText.includes("medical@sportssphere.example"))?.querySelectorAll("button")[1]);
       const label = await btn.evaluate((b) => b?.innerText.trim() ?? "");
       if (label !== expect) throw new Error(`expected “${expect}”, got “${label}”`);

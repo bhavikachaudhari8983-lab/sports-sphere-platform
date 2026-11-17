@@ -29,6 +29,8 @@ export type ErpStudent = {
 
 export interface ErpService {
   findStudentByPrn(prn: string): Promise<ErpStudent | null>;
+  /** University email (e.g. from "Sign in with Google") → the student's record. */
+  findStudentByEmail(email: string): Promise<ErpStudent | null>;
   getStudentPhoto(prn: string): Promise<BinaryFile | null>;
 }
 
@@ -48,6 +50,22 @@ export interface DigiLockerService {
   startConsent(input: { aadhaarNumber: string }): Promise<{ requestId: string; maskedMobile: string; demoOtp?: string }>;
   /** Completes consent after the student enters the OTP and approves sharing. */
   completeConsent(input: { requestId: string; otp: string }): Promise<DigiLockerProfile>;
+}
+
+// ---------- Aadhaar Offline e-KYC (UIDAI-signed file uploaded by the student) ----------
+// The student downloads a password-protected ZIP from UIDAI (password = the share code they set) containing an XML
+// file digitally signed by UIDAI. A real implementation must open the ZIP with the share code, verify UIDAI's
+// signature against UIDAI's published certificate, and read the details ONLY from the signed content. It must be
+// written against UIDAI's official specification and tested with genuine files; it is not built yet.
+export interface AadhaarOfflineService {
+  verify(input: { file: Uint8Array; shareCode: string }): Promise<DigiLockerProfile>;
+}
+
+// ---------- Email (notifications) ----------
+export type EmailMessage = { to: string; subject: string; text: string; html: string };
+export interface EmailService {
+  /** "DEMO" = not really sent (demo mode, message only logged). */
+  send(message: EmailMessage): Promise<"SENT" | "DEMO">;
 }
 
 // ---------- OTP delivery (SMS / email gateway) ----------

@@ -40,7 +40,8 @@ export async function decideEventChange(studentId: string, requestId: string, ap
   if (approveIt) {
     // Re-check now: the event may have filled up, or the DOB may have been corrected, since the student asked.
     const s = await prisma.student.findUnique({ where: { id: studentId }, select: { gender: true, dob: true } });
-    const { errors } = await validateRegistrations([{ eventId: r.toEventId, weightCategoryId: r.weightCategoryId }], { studentId, gender: s?.gender ?? null, dob: s?.dob ?? null }, { requireWeight: true });
+    // The deadline isn't re-checked here: the student asked while registration was open.
+    const { errors } = await validateRegistrations([{ eventId: r.toEventId, weightCategoryId: r.weightCategoryId }], { studentId, gender: s?.gender ?? null, dob: s?.dob ?? null }, { requireWeight: true, checkWindow: false });
     const err = Object.values(errors)[0];
     if (err) throw new ApiError(409, `Can't approve: ${err}. Decline the request instead.`);
     await prisma.$transaction([

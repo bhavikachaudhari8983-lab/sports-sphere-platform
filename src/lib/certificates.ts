@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import QRCode from "qrcode";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { embedBrandFonts } from "./pdf-fonts";
 import type { Certificate } from "@prisma/client";
 import { prisma } from "./prisma";
 import { audit, type Actor } from "./audit";
@@ -49,7 +50,7 @@ async function newCode(): Promise<string> {
  * and a medal certificate for every podium athlete (each member of a podium team). Existing ones are kept.
  */
 export async function issueForEvent(eventId: string, actor: Actor & { type: "STAFF" }, ip: string | null) {
-  const ev = await prisma.event.findUnique({ where: { id: eventId }, include: { sport: true } });
+  const ev = await prisma.event.findUnique({ where: { id: eventId }, include: { sport: true, tournament: true } });
   if (!ev) throw new ApiError(404, "Event not found");
   if (!ev.resultsFinal) throw new ApiError(409, "Finalise the results first, so medal certificates are correct.");
   const settings = await getSettings();
@@ -74,7 +75,7 @@ export async function issueForEvent(eventId: string, actor: Actor & { type: "STA
       code: await newCode(),
       recipient: w.s.fullName ?? "—",
       institution: institutionOf(w.s),
-      title: `${ev.sport.name} · ${ev.name}${w.division ? ` · ${w.division}` : ""} — ${settings.meetName}`,
+      title: `${ev.sport.name} · ${ev.name}${w.division ? ` · ${w.division}` : ""} — ${ev.tournament?.name ?? settings.meetName}`,
       kind: w.kind,
       division: w.division,
       issuedAt: new Date(Math.floor(Date.now() / 1000) * 1000),
@@ -129,8 +130,9 @@ export async function renderCertificatePdf(c: Certificate): Promise<Uint8Array> 
   doc.setTitle(`${CERT_LABEL[c.kind as CertKind] ?? c.kind} — ${c.recipient}`);
   doc.setAuthor(APP_NAME);
   const page = doc.addPage([W, H]);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const lato = await embedBrandFonts(doc);
+  const bold = lato.bold;
+  const font = lato.regular;
   const mono = await doc.embedFont(StandardFonts.Courier);
   const navy = rgb(0.055, 0.078, 0.188);
   const muted = rgb(0.35, 0.39, 0.47);
@@ -150,8 +152,8 @@ export async function renderCertificatePdf(c: Certificate): Promise<Uint8Array> 
     const logo = await doc.embedPng(logoBytes);
     page.drawImage(logo, { x: W / 2 - 34, y: H - 132, width: 68, height: 68 });
   }
-  centre("SPORTS SPHERE", H - 152, 14, bold);
-  centre(CERT_LABEL[c.kind as CertKind] ?? c.kind, H - 205, 34, bold, accent);
+  centre("SPORTS SPHERE", H - 152, 14, lato.blackItalic);
+  centre(CERT_LABEL[c.kind as CertKind] ?? c.kind, H - 205, 34, lato.black, accent);
   centre("This certifies that", H - 245, 13, font, muted);
   centre(c.recipient, H - 290, 30, bold);
   centre(c.institution, H - 318, 13, font, muted);

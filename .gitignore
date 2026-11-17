@@ -25,3 +25,5 @@ npm-debug.log*
 coverage/
 tests/e2e/.artifacts/
 uploads-e2e/
+.vercel
+.env*

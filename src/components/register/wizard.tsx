@@ -8,12 +8,12 @@ import { WIZARD_STEPS } from "@/lib/constants";
 import type { RegistrationDraft } from "@/lib/registration-types";
 import { api } from "@/lib/client-api";
 import { cn } from "@/lib/utils";
-import { WizardProvider, useWizard, type SaveState } from "./wizard-context";
+import { WizardProvider, useWizard, type SaveState, type VerifyOptions } from "./wizard-context";
 import { STEP_COMPONENTS } from "./steps";
 
-export function Wizard({ initial, demo }: { initial: RegistrationDraft; demo: boolean }) {
+export function Wizard({ initial, demo, verifyOptions }: { initial: RegistrationDraft; demo: boolean; verifyOptions: VerifyOptions }) {
   return (
-    <WizardProvider initial={initial} demo={demo}>
+    <WizardProvider initial={initial} demo={demo} verifyOptions={verifyOptions}>
       <WizardShell />
     </WizardProvider>
   );

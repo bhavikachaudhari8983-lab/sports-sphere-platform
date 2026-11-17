@@ -6,12 +6,15 @@ import { requireStaffPage } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { sideOf } from "@/lib/competition";
 import { LiveScorer } from "@/components/competition/live-scorer";
+import { canScore } from "@/lib/match-management";
+import { EmptyState } from "@/components/ui/feedback";
+import { ShieldX } from "lucide-react";
 
 export const metadata: Metadata = { title: "Score match" };
 
 export default async function ScoreMatch({ params }: { params: Promise<{ matchId: string }> }) {
   const { matchId } = await params;
-  await requireStaffPage(["ADMIN", "OFFICIAL"], `/score/${matchId}`);
+  const me = await requireStaffPage(["ADMIN", "OFFICIAL"], `/score/${matchId}`);
   const m = await prisma.match.findUnique({
     where: { id: matchId },
     include: {
@@ -22,6 +25,13 @@ export default async function ScoreMatch({ params }: { params: Promise<{ matchId
     },
   });
   if (!m) notFound();
+  if (!(await canScore(me, m.id))) {
+    return (
+      <div className="mx-auto max-w-xl">
+        <EmptyState icon={<ShieldX className="size-7" aria-hidden />} title="You aren't the scorer for this match" description="Only the official assigned as scorer can enter its score. Ask the organiser if you should be scoring it." action={<Link href="/score" className="font-semibold underline underline-offset-4">My matches</Link>} />
+      </div>
+    );
+  }
   const home = sideOf(m, "HOME"), away = sideOf(m, "AWAY");
   return (
     <div className="mx-auto max-w-xl space-y-4">

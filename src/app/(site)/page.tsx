@@ -29,13 +29,17 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
-import { getSettings } from "@/lib/settings";
-import { APP_NAME, CONTACT_EMAIL, CONTACT_PHONE } from "@/lib/constants";
+import { CONTACT_EMAIL, CONTACT_PHONE } from "@/lib/constants";
 import { ButtonLink } from "@/components/ui/button";
 import { LogoMark } from "@/components/layout/logo";
+import { StatusPill } from "@/components/ui/status-pill";
+import { MatchRow } from "@/components/competition/match-row";
+import { TournamentCard } from "@/components/competition/tournament-card";
+import { getHomeData, type OpenTournament, type PublicMatch } from "@/lib/public-home";
 import { Card, CardBody } from "@/components/ui/card";
 
-export const revalidate = 300;
+// Rendered fresh on every visit: the page shows live scores and open registrations, which can't be minutes old.
+export const dynamic = "force-dynamic";
 
 const SPORT_ICON: Record<string, LucideIcon> = {
   Cricket: Target,
@@ -94,57 +98,163 @@ const FAQ = [
   { q: "Do I need to print anything?", a: "No — the process is fully paperless. Show your QR Sports ID on your phone. A PDF and PNG are available if you want a copy." },
 ];
 
+function Section({ id, eyebrow, title, action, children }: { id: string; eyebrow: string; title: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section aria-labelledby={id} className="mx-auto max-w-7xl px-4 pt-14 sm:px-6">
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="eyebrow text-tint-fg">{eyebrow}</p>
+          <h2 id={id} className="display mt-2 text-[clamp(1.75rem,4vw,2.5rem)] text-fg">
+            {title}
+          </h2>
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function FeaturedLive({ m }: { m: PublicMatch }) {
+  return (
+    <Link href={`/events/${m.eventId}`} className="block w-full max-w-md rounded-lg border border-white/10 bg-stage-2 p-5 shadow-2xl hover:border-white/25">
+      <div className="flex items-center justify-between gap-2">
+        <StatusPill status="LIVE" label="Live now" className="bg-white/10" />
+        <span className="truncate text-small text-stage-muted">
+          {m.sport} · {m.round}
+        </span>
+      </div>
+      {[
+        { s: m.home, score: m.homeScore },
+        { s: m.away, score: m.awayScore },
+      ].map(({ s, score }, i) => (
+        <div key={i} className={`flex items-center justify-between gap-4 py-3 ${i === 0 ? "mt-3 border-b border-white/10" : ""}`}>
+          <span className="min-w-0">
+            <span className="block truncate text-lg font-black">{s?.name ?? "To be decided"}</span>
+            <span className="block truncate text-small text-stage-muted">{s?.institution}</span>
+          </span>
+          <span className="text-5xl font-black tabular">{score ?? 0}</span>
+        </div>
+      ))}
+      <p className="mt-3 inline-flex items-center gap-1 text-small font-bold text-volt">
+        Follow the match <ArrowRight className="size-4" aria-hidden />
+      </p>
+    </Link>
+  );
+}
+
 export default async function HomePage() {
-  const [sports, settings] = await Promise.all([prisma.sport.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { name: true, isWeightCategory: true, isTeam: true } }).catch(() => []), getSettings().catch(() => null)]);
+  const [sports, home] = await Promise.all([
+    prisma.sport.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { name: true, isWeightCategory: true, isTeam: true } }).catch(() => []),
+    getHomeData().catch(() => ({ live: [] as PublicMatch[], upcoming: [] as PublicMatch[], results: [] as PublicMatch[], open: [] as OpenTournament[] })),
+  ]);
+  const anyOpen = home.open.length > 0;
+  const nothingYet = !home.live.length && !home.upcoming.length && !home.results.length && !anyOpen;
 
   return (
     <>
-      {/* Hero */}
-      <section className="hero-pattern relative overflow-hidden">
-        <div className="mx-auto grid max-w-7xl items-center gap-6 px-4 py-8 sm:gap-10 sm:px-6 sm:py-20 lg:grid-cols-[1fr_auto] lg:py-24">
-          <div className="order-2 lg:order-1">
-          <p className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-small font-medium shadow-card">
-            <Trophy className="size-4 text-tint-fg" aria-hidden />
-            {settings?.meetName ?? APP_NAME}
-          </p>
-          <h1 className="mt-5 max-w-3xl text-hero-fg">
-            Register. Get verified. <span className="text-gradient-sphere whitespace-nowrap italic">Play fair.</span>
-          </h1>
-          <p className="mt-5 max-w-2xl text-lg text-hero-muted">
-            One paperless registration for inter-university games — open to host-university students, other universities and international students. Verified age, verified identity, one QR Sports ID.
-          </p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <ButtonLink href="/register" size="lg">
-              Register now <ArrowRight className="size-5" aria-hidden />
-            </ButtonLink>
-            <ButtonLink href="/status" size="lg" variant="outline" className="border-hero-fg bg-transparent text-hero-fg">
-              Check status
-            </ButtonLink>
-          </div>
-          <ul className="mt-10 grid max-w-3xl gap-3 text-small text-hero-fg sm:grid-cols-3">
-            {[
-              { icon: ShieldCheck, t: "DigiLocker & passport verified" },
-              { icon: BadgeCheck, t: "Age category set automatically" },
-              { icon: QrCode, t: "Signed QR Sports ID" },
-            ].map(({ icon: Icon, t }) => (
-              <li key={t} className="flex items-center gap-2">
-                <Icon className="size-5 shrink-0 text-tint-fg" aria-hidden /> {t}
-              </li>
-            ))}
-          </ul>
-          </div>
-          <div className="order-1 flex justify-center lg:order-2">
-            <div className="rounded-full bg-white p-2 shadow-[0_0_0_6px_rgb(238_122_43/0.08),0_20px_60px_-10px_rgb(238_122_43/0.4)]">
-              <LogoMark size={296} priority alt="Sports Sphere — MIT-WPU: Fueling passion, building champions" className="size-28 sm:size-52 lg:size-72" />
+      {/* Hero: navy stage */}
+      <section className="stage relative overflow-hidden">
+        <div aria-hidden className="brand-stripe absolute inset-x-0 top-0" />
+        <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 py-12 sm:px-6 sm:py-20 lg:grid-cols-[1.15fr_0.85fr]">
+          <div className={home.live[0] ? "order-1" : "order-2 lg:order-1"}>
+            <p className="eyebrow text-volt">MIT-WPU · Sports Sphere</p>
+            <h1 className="display mt-4 text-[clamp(2.6rem,8vw,5.25rem)] text-stage-fg">
+              Your game.
+              <br />
+              Your moment.
+              <br />
+              <span className="text-volt">Your championship.</span>
+            </h1>
+            <p className="mt-6 max-w-xl text-lg text-stage-muted">Find your competition, register in minutes and follow every match, from the first whistle to the final. Open to students of every university.</p>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              {anyOpen && (
+                <ButtonLink href="/register" size="lg" variant="volt">
+                  Register for a tournament <ArrowRight className="size-5" aria-hidden />
+                </ButtonLink>
+              )}
+              <ButtonLink href="/events" size="lg" variant={anyOpen ? "stageOutline" : "volt"}>
+                {home.live.length ? `Watch live (${home.live.length})` : "Live & results"}
+              </ButtonLink>
+              <ButtonLink href="/status" size="lg" variant="stageOutline">
+                My account
+              </ButtonLink>
             </div>
+            <ul className="mt-10 grid max-w-3xl gap-3 text-small text-stage-muted sm:grid-cols-3">
+              {[
+                { icon: ShieldCheck, t: "Verified identity for every athlete" },
+                { icon: BadgeCheck, t: "Age category set automatically" },
+                { icon: QrCode, t: "One QR Sports ID for every venue" },
+              ].map(({ icon: Icon, t }) => (
+                <li key={t} className="flex items-center gap-2">
+                  <Icon className="size-5 shrink-0 text-volt" aria-hidden /> {t}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className={`flex justify-center ${home.live[0] ? "order-2" : "order-1 lg:order-2"}`}>
+            {home.live[0] ? (
+              <FeaturedLive m={home.live[0]} />
+            ) : (
+              <div className="rounded-full bg-white p-2 shadow-[0_0_0_8px_rgb(246_198_66/0.15),0_30px_80px_-20px_rgb(0_0_0/0.6)]">
+                <LogoMark size={296} priority alt="Sports Sphere, MIT-WPU: fueling passion, building champions" className="size-32 sm:size-56 lg:size-72" />
+              </div>
+            )}
           </div>
         </div>
-        <div aria-hidden className="track-stripe h-2 opacity-80" />
       </section>
+
+      {nothingYet && (
+        <section className="mx-auto max-w-7xl px-4 pt-14 sm:px-6">
+          <p className="rounded-lg border border-dashed border-border-strong bg-surface p-6 text-center text-muted">
+            Tournaments and matches will appear here as soon as the sports office publishes them.
+          </p>
+        </section>
+      )}
+
+      {home.live.length > 0 && (
+        <Section id="live-heading" eyebrow="Happening now" title="Live now" action={<Link href="/events" className="font-bold underline underline-offset-4">All live scores</Link>}>
+          <div className="stage rounded-lg px-4">
+            {home.live.map((m) => (
+              <MatchRow key={m.id} m={m} onStage />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {anyOpen && (
+        <Section id="open-heading" eyebrow="Registration is open" title="Find your competition">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {home.open.map((t) => (
+              <TournamentCard key={t.id} t={t} />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {home.upcoming.length > 0 && (
+        <Section id="next-heading" eyebrow="Coming up" title="Next matches" action={<Link href="/events" className="font-bold underline underline-offset-4">Full schedule</Link>}>
+          <div className="rounded-lg border border-border bg-surface px-4 shadow-card">
+            {home.upcoming.map((m) => (
+              <MatchRow key={m.id} m={m} />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {home.results.length > 0 && (
+        <Section id="results-heading" eyebrow="Latest results" title="Final scores" action={<Link href="/events" className="font-bold underline underline-offset-4">All results</Link>}>
+          <div className="rounded-lg border border-border bg-surface px-4 shadow-card">
+            {home.results.map((m) => (
+              <MatchRow key={m.id} m={m} />
+            ))}
+          </div>
+        </Section>
+      )}
 
       {/* Sports */}
       <section aria-labelledby="sports-heading" className="mx-auto max-w-7xl px-4 py-16 sm:px-6">
-        <h2 id="sports-heading" className="text-fg">
+        <h2 id="sports-heading" className="display text-[clamp(1.75rem,4vw,2.5rem)] text-fg">
           Sports offered
         </h2>
         <p className="mt-2 text-muted">{sports.length} sports. Combat and strength sports have weight categories with an event-day weigh-in.</p>
@@ -169,7 +279,7 @@ export default async function HomePage() {
       {/* How it works */}
       <section aria-labelledby="how-heading" className="border-y border-border bg-surface">
         <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6">
-          <h2 id="how-heading" className="text-fg">
+          <h2 id="how-heading" className="display text-[clamp(1.75rem,4vw,2.5rem)] text-fg">
             How registration works
           </h2>
           <ol className="mt-8 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
@@ -189,7 +299,7 @@ export default async function HomePage() {
 
       {/* Documents */}
       <section aria-labelledby="docs-heading" className="mx-auto max-w-7xl px-4 py-16 sm:px-6">
-        <h2 id="docs-heading" className="text-fg">
+        <h2 id="docs-heading" className="display text-[clamp(1.75rem,4vw,2.5rem)] text-fg">
           What you&apos;ll need
         </h2>
         <p className="mt-2 max-w-2xl text-muted">If the university can fetch or check something itself, you don&apos;t upload it. Images or PDF, up to 5 MB each — you can take photos with your phone camera.</p>
@@ -231,7 +341,7 @@ export default async function HomePage() {
       {/* FAQ */}
       <section aria-labelledby="faq-heading" className="border-y border-border bg-surface">
         <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
-          <h2 id="faq-heading" className="text-fg">
+          <h2 id="faq-heading" className="display text-[clamp(1.75rem,4vw,2.5rem)] text-fg">
             Frequently asked questions
           </h2>
           <div className="mt-8 divide-y divide-border rounded-xl border border-border bg-bg">
@@ -254,7 +364,7 @@ export default async function HomePage() {
       <section aria-labelledby="contact-heading" className="mx-auto max-w-7xl px-4 py-16 sm:px-6">
         <div className="grid gap-8 lg:grid-cols-2">
           <div>
-            <h2 id="contact-heading" className="text-fg">
+            <h2 id="contact-heading" className="display text-[clamp(1.75rem,4vw,2.5rem)] text-fg">
               Contact the sports office
             </h2>
             <p className="mt-2 text-muted">For flagged registrations, DOB corrections or college confirmations, bring your original documents.</p>

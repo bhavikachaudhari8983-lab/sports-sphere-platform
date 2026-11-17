@@ -6,7 +6,7 @@ export default function NotFound() {
   return (
     <div className="flex min-h-dvh flex-col">
       <header className="bg-surface px-4 shadow-card">
-        <div className="mx-auto flex h-16 max-w-7xl items-center">
+        <div className="mx-auto flex h-20 max-w-7xl items-center">
           <Logo />
         </div>
       </header>

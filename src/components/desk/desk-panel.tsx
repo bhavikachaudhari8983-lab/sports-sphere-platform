@@ -21,6 +21,8 @@ type Props = {
   isInternational: boolean;
   passportVerified: boolean;
   passportLabel: string | null;
+  /** Manual identity route: details to compare with the original Government ID. null = not a manual identity. */
+  idCheck: { verified: boolean; idLabel: string; name: string; dob: string; aadhaarLast4: string } | null;
   blockers: string[];
   latest: { heightCm: number; weightKg: number; at: string; by: string } | null;
   weighEvents: WeighEvent[];
@@ -33,6 +35,7 @@ export function DeskPanel(p: Props) {
   const [mErr, setMErr] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [passportTick, setPassportTick] = useState(false);
+  const [idTick, setIdTick] = useState(false);
   const [confirmVerify, setConfirmVerify] = useState(false);
   const [weigh, setWeigh] = useState<Record<string, string>>({});
   const [weighErr, setWeighErr] = useState<Record<string, string>>({});
@@ -119,6 +122,47 @@ export function DeskPanel(p: Props) {
                   }}
                 >
                   Save passport check
+                </Button>
+              </>
+            )}
+          </CardBody>
+        </Card>
+      )}
+
+      {p.idCheck && (
+        <Card>
+          <CardHeader title="Government ID check" description={`${p.idCheck.idLabel}, entered by the student`} />
+          <CardBody className="space-y-3">
+            {p.idCheck.verified ? (
+              <p className="inline-flex items-center gap-2 font-semibold text-success-fg">
+                <BadgeCheck className="size-5" aria-hidden /> Original ID checked
+              </p>
+            ) : (
+              <>
+                <p className="text-muted">Ask for the original ID. Check that the photo is this athlete, and that it shows exactly:</p>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-lg bg-surface-2 p-3 text-small">
+                  <dt className="text-muted">Name</dt>
+                  <dd className="font-semibold">{p.idCheck.name}</dd>
+                  <dt className="text-muted">Date of birth</dt>
+                  <dd className="font-semibold">{p.idCheck.dob}</dd>
+                  <dt className="text-muted">Aadhaar last 4</dt>
+                  <dd className="font-mono font-semibold">XXXX XXXX {p.idCheck.aadhaarLast4}</dd>
+                </dl>
+                <p className="text-small text-muted">If anything differs, don&apos;t tick. Flag the registration for the sports office instead.</p>
+                <Checkbox id="idTick" checked={idTick} onChange={(e) => setIdTick(e.target.checked)} label="Original ID seen, photo matches, and all details match" />
+                <Button
+                  variant="secondary"
+                  disabled={!idTick}
+                  loading={busy === "id"}
+                  icon={<BookUser className="size-4" aria-hidden />}
+                  onClick={async () => {
+                    const r = await post({ op: "id-doc", verified: true }, "id");
+                    if (!r.ok) return toast.error("Not saved", r.error);
+                    toast.success("ID check saved");
+                    router.refresh();
+                  }}
+                >
+                  Save ID check
                 </Button>
               </>
             )}

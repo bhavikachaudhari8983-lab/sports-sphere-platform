@@ -1,5 +1,6 @@
 import type { NextAuthOptions, User } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
+import GoogleProvider, { type GoogleProfile } from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { prisma } from "./prisma";
 import { audit } from "./audit";
@@ -7,7 +8,8 @@ import { rateLimit, resetRateLimit } from "./rate-limit";
 import { consumeOtpChallenge, OtpError } from "./otp";
 import { staffLoginSchema, verifyOtpSchema } from "./validation/auth";
 import { isStaffRole, UNIVERSITY_NAME } from "./constants";
-import { erpService } from "@/services";
+import { erpService, type ErpStudent } from "@/services";
+import { hostedDomainHint, matchUniversity, universitySso } from "./university-sso";
 
 // Real bcrypt hash of a random value: comparing against it keeps timing equal for unknown emails.
 const DUMMY_HASH = bcrypt.hashSync(Math.random().toString(36), 10);
@@ -19,6 +21,51 @@ function ipOf(req: ReqLike | undefined): string {
   const fwd = typeof h["x-forwarded-for"] === "string" ? h["x-forwarded-for"] : "";
   return fwd.split(",")[0]?.trim() || "local";
 }
+
+/** First sign-in of a host-university student: create their draft from the university's records (never typed data). */
+async function createHostStudent(erp: ErpStudent, ip: string, how: string) {
+  const school = erp.schoolCode ? await prisma.school.findUnique({ where: { code: erp.schoolCode }, select: { id: true } }) : null;
+  const student = await prisma.student.create({
+    data: {
+      studentType: "OUR_INDIAN",
+      isOurUniversity: true,
+      prn: erp.prn,
+      mobile: erp.phone,
+      email: erp.email,
+      mobileVerified: true,
+      emailVerified: true,
+      universityName: UNIVERSITY_NAME,
+      course: erp.course,
+      year: erp.year,
+      schoolId: school?.id ?? null,
+    },
+  });
+  await audit({ actor: { type: "STUDENT", id: student.id, name: erp.name }, action: "REGISTRATION_STARTED", studentId: student.id, summary: `Registration started (our university, PRN ${erp.prn}, ${how})`, ip });
+  return student;
+}
+
+/** Host-university Google sign-in → the student's record (created from the university records on first sign-in). */
+async function hostStudentForEmail(email: string, ip: string) {
+  const erp = await erpService.findStudentByEmail(email);
+  if (erp) return (await prisma.student.findUnique({ where: { prn: erp.prn } })) ?? createHostStudent(erp, ip, "university Google sign-in");
+  return prisma.student.findFirst({ where: { email, isOurUniversity: true }, orderBy: { updatedAt: "desc" } });
+}
+
+/**
+ * Visiting-university Google sign-in. The account proves the student belongs to that university, so we
+ * verify their email and pre-fill the university name; identity is still checked in the outside-student flow.
+ */
+async function partnerStudentForEmail(email: string, universityName: string, ip: string) {
+  const existing = await prisma.student.findFirst({ where: { email, studentType: "OUTSIDE_INDIAN" }, orderBy: { updatedAt: "desc" } });
+  if (existing) return existing;
+  const student = await prisma.student.create({
+    data: { studentType: "OUTSIDE_INDIAN", isOurUniversity: false, email, emailVerified: true, universityName },
+  });
+  await audit({ actor: { type: "STUDENT", id: student.id, name: email }, action: "REGISTRATION_STARTED", studentId: student.id, summary: `Registration started (outside student, ${universityName}, university Google sign-in)`, ip });
+  return student;
+}
+
+const sso = universitySso();
 
 export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt", maxAge: 12 * 60 * 60 },
@@ -81,24 +128,11 @@ export const authOptions: NextAuthOptions = {
           if (!student) {
             const erp = await erpService.findStudentByPrn(meta.prn);
             if (!erp) throw new Error("Not a registered student of this university.");
-            const school = erp.schoolCode ? await prisma.school.findUnique({ where: { code: erp.schoolCode }, select: { id: true } }) : null;
-            student = await prisma.student.create({
-              data: {
-                studentType: "OUR_INDIAN",
-                isOurUniversity: true,
-                prn: erp.prn,
-                mobile: erp.phone,
-                email: erp.email,
-                mobileVerified: true,
-                emailVerified: true,
-                universityName: UNIVERSITY_NAME,
-                course: erp.course,
-                year: erp.year,
-                schoolId: school?.id ?? null,
-              },
-            });
-            await audit({ actor: { type: "STUDENT", id: student.id, name: erp.name }, action: "REGISTRATION_STARTED", studentId: student.id, summary: `Registration started (our university, PRN ${erp.prn})`, ip });
+            student = await createHostStudent(erp, ip, "PRN + OTP");
           }
+        } else if (meta.path === "LOGIN_PRN") {
+          student = await prisma.student.findUnique({ where: { prn: meta.prn } });
+          if (!student) throw new Error("No registration found for this PRN.");
         } else {
           student = await prisma.student.findFirst({ where: byContact, orderBy: { updatedAt: "desc" } });
           if (!student) {
@@ -116,9 +150,43 @@ export const authOptions: NextAuthOptions = {
         return { id: student.id, name: student.fullName ?? "Student", role: "STUDENT" };
       },
     }),
+    ...(sso
+      ? [
+          GoogleProvider({
+            clientId: sso.clientId,
+            clientSecret: sso.clientSecret,
+            // `hd` makes Google show only university accounts; the domain is checked again in signIn below.
+            // `hd` restricts Google's picker to one domain only when there's a single (host) university;
+            // with visiting universities the picker stays open and the domain is checked in signIn().
+            authorization: { params: { ...(hostedDomainHint(sso) ? { hd: hostedDomainHint(sso) } : {}), prompt: "select_account" } },
+          }),
+        ]
+      : []),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async signIn({ user, account, profile }) {
+      if (account?.provider !== "google") return true;
+      const uni = sso ? matchUniversity(profile as GoogleProfile, sso) : null;
+      if (!uni) return "/status?sso=wrong-domain";
+      const email = (profile as GoogleProfile).email.trim().toLowerCase();
+      try {
+        const student = uni.isHost ? await hostStudentForEmail(email, "sso") : await partnerStudentForEmail(email, uni.name, "sso");
+        if (!student) return "/status?sso=not-found";
+        (user as { studentId?: string }).studentId = student.id;
+        await audit({ actor: { type: "STUDENT", id: student.id, name: student.fullName ?? email }, action: "LOGIN", studentId: student.id, summary: `Student signed in with ${uni.isHost ? "university" : uni.name} Google account`, ip: "sso" });
+        return true;
+      } catch {
+        return "/status?sso=failed";
+      }
+    },
+    async jwt({ token, user, account }) {
+      if (account?.provider === "google") {
+        // Replace Google's identity with the portal's student record found in signIn().
+        const studentId = (user as { studentId?: string } | undefined)?.studentId;
+        const student = studentId ? await prisma.student.findUnique({ where: { id: studentId }, select: { id: true, fullName: true } }) : null;
+        if (!student) throw new Error("University sign-in failed.");
+        return { ...token, uid: student.id, role: "STUDENT", sportId: null, name: student.fullName ?? "Student", email: undefined, picture: undefined, sub: student.id };
+      }
       if (user) {
         token.uid = user.id;
         token.role = user.role;
